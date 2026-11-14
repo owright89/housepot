@@ -68,11 +68,15 @@ class Household extends Model
      */
     public function roleOf(User $user): ?HouseholdRole
     {
-        return $this->members()
+        // getRelation() instead of ->membership: Larastan types the pivot as `pivot`,
+        // ignoring our accessor. https://github.com/phpstan/phpstan/issues/12756
+        /** @var Membership|null $membership */
+        $membership = $this->members()
             ->whereKey($user->id)
             ->first()
-            ?->membership
-            ->role;
+            ?->getRelation('membership');
+
+        return $membership?->role;
     }
 
     /**
