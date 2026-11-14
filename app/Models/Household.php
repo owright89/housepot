@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\HouseholdRole;
 use Database\Factories\HouseholdFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Scope;
@@ -50,6 +51,28 @@ class Household extends Model
     public function isArchived(): bool
     {
         return $this->archived_at !== null;
+    }
+
+    /**
+     * Whether the user is a current member (not left).
+     */
+    public function hasMember(User $user): bool
+    {
+        return $this->members()
+            ->whereKey($user->id)
+            ->exists();
+    }
+
+    /**
+     * The user's role, or null if they aren't a current member.
+     */
+    public function roleOf(User $user): ?HouseholdRole
+    {
+        return $this->members()
+            ->whereKey($user->id)
+            ->first()
+            ?->membership
+            ->role;
     }
 
     /**

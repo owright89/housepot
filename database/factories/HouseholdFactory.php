@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Enums\HouseholdRole;
 use App\Models\Household;
 use App\Models\User;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -44,6 +45,19 @@ class HouseholdFactory extends Factory
             $household->allMembers()->attach(
                 $owner ?? User::factory()->create(),
                 ['role' => HouseholdRole::Owner],
+            );
+        });
+    }
+
+    /**
+     * Attach a member after creating, using the given user or a new one. Pass $leftAt for a former member.
+     */
+    public function withMember(?User $member = null, ?CarbonInterface $leftAt = null): static
+    {
+        return $this->afterCreating(function (Household $household) use ($member, $leftAt) {
+            $household->allMembers()->attach(
+                $member ?? User::factory()->create(),
+                ['role' => HouseholdRole::Member, 'left_at' => $leftAt],
             );
         });
     }
