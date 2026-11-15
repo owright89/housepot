@@ -120,6 +120,14 @@ class Household extends Model
     }
 
     /**
+     * @return HasMany<HouseholdInvite, $this>
+     */
+    public function invites(): HasMany
+    {
+        return $this->hasMany(HouseholdInvite::class);
+    }
+
+    /**
      * @return HasMany<JournalEntry, $this>
      */
     public function journalEntries(): HasMany
