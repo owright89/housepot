@@ -26,7 +26,8 @@
                 </flux:sidebar.item>
 
                 @if ($currentHousehold)
-                    <flux:sidebar.item icon="document-text" :href="route('households.show', $currentHousehold)" wire:navigate>
+                    {{-- Bills lives on the household page, where Households is already highlighted; :current="false" stops Flux auto-highlighting it too. --}}
+                    <flux:sidebar.item icon="document-text" :href="route('households.show', $currentHousehold).'#bills'" :current="false" wire:navigate>
                         {{ __('Bills') }}
                     </flux:sidebar.item>
                 @endif

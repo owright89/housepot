@@ -163,3 +163,13 @@ test('the owner of an archived household cannot create an invite', function () {
 
     expect($household->invites()->count())->toBe(0);
 });
+
+test('only the Households nav item is highlighted on a household page', function () {
+    $user = User::factory()->create();
+    $household = Household::factory()->withOwner($user)->create();
+
+    $html = actingAs($user)->get(route('households.show', $household))->assertOk()->getContent();
+
+    // The attribute itself, not the many `data-current:` styling classes.
+    expect(preg_match_all('/\sdata-current(?=[\s>=])/', $html))->toBe(1);
+});
