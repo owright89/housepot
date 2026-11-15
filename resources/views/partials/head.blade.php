@@ -12,4 +12,7 @@
 @fonts
 
 @vite(['resources/css/app.css', 'resources/js/app.js'])
-@fluxAppearance
+{{-- Pages can pass 'forceLight' => true to skip the user's light/dark preference (e.g. the marketing page). --}}
+@unless ($forceLight ?? false)
+    @fluxAppearance
+@endunless
