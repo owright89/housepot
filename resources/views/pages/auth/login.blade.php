@@ -1,16 +1,15 @@
 <x-layouts::auth :title="__('Log in')">
     <div class="flex flex-col gap-6">
-        <x-auth-header :title="__('Log in to your account')" :description="__('Enter your email and password below to log in')" />
+        <x-auth-header :title="__('Welcome back')" :description="__('Log in to see what\'s due and who owes who.')" />
 
         <!-- Session Status -->
         <x-auth-session-status class="text-center" :status="session('status')" />
 
-        <x-passkey-verify />
+        <x-passkey-verify :separator="__('or use your email')" />
 
-        <form method="POST" action="{{ route('login.store') }}" class="flex flex-col gap-6">
+        <form method="POST" action="{{ route('login.store') }}" class="flex flex-col gap-5">
             @csrf
 
-            <!-- Email Address -->
             <flux:input
                 name="email"
                 :label="__('Email address')"
@@ -19,10 +18,9 @@
                 required
                 autofocus
                 autocomplete="email"
-                placeholder="email@example.com"
+                placeholder="you@example.com"
             />
 
-            <!-- Password -->
             <div class="relative">
                 <flux:input
                     name="password"
@@ -30,30 +28,46 @@
                     type="password"
                     required
                     autocomplete="current-password"
-                    :placeholder="__('Password')"
+                    :placeholder="__('Your password')"
                     viewable
                 />
 
                 @if (Route::has('password.request'))
-                    <flux:link class="absolute top-0 text-sm end-0" :href="route('password.request')" wire:navigate>
-                        {{ __('Forgot your password?') }}
+                    <flux:link class="absolute end-0 top-0 text-sm font-semibold" :href="route('password.request')" wire:navigate>
+                        {{ __('Forgot password?') }}
                     </flux:link>
                 @endif
             </div>
 
-            <!-- Remember Me -->
-            <flux:checkbox name="remember" :label="__('Remember me')" :checked="old('remember')" />
+            <flux:checkbox name="remember" :label="__('Keep me logged in')" :checked="old('remember')" />
 
-            <div class="flex items-center justify-end">
-                <flux:button variant="primary" type="submit" class="w-full" data-test="login-button">
-                    {{ __('Log in') }}
-                </flux:button>
-            </div>
+            <flux:button variant="primary" type="submit" class="w-full" data-test="login-button">
+                {{ __('Log in') }}
+            </flux:button>
         </form>
 
-        <div class="space-x-1 text-sm text-center rtl:space-x-reverse text-zinc-600 dark:text-zinc-400">
-            <span>{{ __('Don\'t have an account?') }}</span>
-            <flux:link :href="route('register')" wire:navigate>{{ __('Sign up') }}</flux:link>
-        </div>
+        @if (Route::has('register'))
+            <p class="text-center text-sm text-muted">
+                {{ __('New to HousePot?') }}
+                <flux:link :href="route('register')" wire:navigate class="font-semibold">{{ __('Create an account') }}</flux:link>
+            </p>
+        @endif
     </div>
+
+    <x-slot:aside>
+        {{-- Example household (sample figures, matches the landing page) --}}
+        <figure class="max-w-sm">
+            <div class="overflow-hidden rounded-(--radius-card) bg-white text-[#15201B]">
+                <div class="flex items-center justify-between px-5 py-3">
+                    <p class="text-sm font-bold">200 Smith Street</p>
+                    <p class="text-xs text-[#5B6B64]">{{ now()->format('F') }}</p>
+                </div>
+                <div class="space-y-1 border-t border-[#E3E8E5] px-5 py-3 text-sm">
+                    <p class="flex justify-between"><span class="text-[#5B6B64]">{{ __('John owes you') }}</span><span class="font-bold text-[#157A55]">£118.20</span></p>
+                    <p class="flex justify-between"><span class="text-[#5B6B64]">{{ __('You owe Steve') }}</span><span class="font-bold text-[#B23A17]">£42.50</span></p>
+                </div>
+            </div>
+            <figcaption class="mt-2 text-xs text-white/80">{{ __('Sample figures') }}</figcaption>
+        </figure>
+    </x-slot:aside>
 </x-layouts::auth>

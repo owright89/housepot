@@ -1,42 +1,38 @@
+@props(['title' => null, 'aside' => null])
+
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="dark">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="light" style="color-scheme: light">
     <head>
-        @include('partials.head')
+        {{-- Auth pages match the light landing page; the app itself follows each user's setting. --}}
+        @include('partials.head', ['title' => $title, 'forceLight' => true])
     </head>
-    <body class="min-h-screen bg-canvas text-ink antialiased">
-        <div class="relative grid h-dvh flex-col items-center justify-center px-8 sm:px-0 lg:max-w-none lg:grid-cols-2 lg:px-0">
-            <div class="relative hidden h-full flex-col p-10 text-white lg:flex dark:border-e dark:border-neutral-800">
-                <div class="absolute inset-0 bg-primary"></div>
-                <a href="{{ route('home') }}" class="relative z-20 flex items-center text-lg font-medium" wire:navigate>
-                    <span class="flex h-10 w-10 items-center justify-center rounded-md">
-                        <x-app-logo-icon class="me-2 h-7 fill-current text-white" />
-                    </span>
-                    {{ config('app.name', 'Laravel') }}
-                </a>
+    <body class="min-h-screen bg-card text-ink antialiased">
+        <div class="grid min-h-dvh lg:grid-cols-2">
+            {{-- Form --}}
+            <div class="flex flex-col px-6 py-6 sm:px-10">
+                <x-app-logo href="{{ route('home') }}" class="self-start text-xl" />
 
-                @php
-                    [$message, $author] = str(Illuminate\Foundation\Inspiring::quotes()->random())->explode('-');
-                @endphp
-
-                <div class="relative z-20 mt-auto">
-                    <blockquote class="space-y-2">
-                        <flux:heading size="lg">&ldquo;{{ trim($message) }}&rdquo;</flux:heading>
-                        <footer><flux:heading>{{ trim($author) }}</flux:heading></footer>
-                    </blockquote>
-                </div>
-            </div>
-            <div class="w-full lg:p-8">
-                <div class="mx-auto flex w-full flex-col justify-center space-y-6 sm:w-[350px]">
-                    <a href="{{ route('home') }}" class="z-20 flex flex-col items-center gap-2 font-medium lg:hidden" wire:navigate>
-                        <span class="flex h-9 w-9 items-center justify-center rounded-md">
-                            <x-app-logo-icon class="size-9 fill-current text-black dark:text-white" />
-                        </span>
-
-                        <span class="sr-only">{{ config('app.name', 'Laravel') }}</span>
-                    </a>
+                <main class="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center py-10">
                     {{ $slot }}
-                </div>
+                </main>
             </div>
+
+            {{-- Marketing panel (large screens only) --}}
+            <aside class="hidden p-4 lg:block" aria-label="{{ __('About HousePot') }}">
+                <div class="flex h-full flex-col justify-center rounded-[24px] bg-primary px-12 py-16 text-white">
+                    <p class="text-4xl leading-tight font-extrabold tracking-tight">
+                        {{ __('Split the bills,') }}<br>
+                        <span class="text-[#FFC3B0]">{{ __('keep the peace.') }}</span>
+                    </p>
+                    <p class="mt-4 max-w-sm text-white/85">
+                        {{ __('Every shared bill in one place, with everyone\'s share worked out for you.') }}
+                    </p>
+
+                    @if ($aside)
+                        <div class="mt-10">{{ $aside }}</div>
+                    @endif
+                </div>
+            </aside>
         </div>
 
         @persist('toast')

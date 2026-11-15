@@ -78,3 +78,13 @@ test('already verified user visiting verification link is redirected without fir
     expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
     Event::assertNotDispatched(Verified::class);
 });
+
+test('verification screen shows the address the link was sent to', function () {
+    $user = User::factory()->unverified()->create(['email' => 'sam@example.com']);
+
+    $this->actingAs($user)
+        ->get(route('verification.notice'))
+        ->assertOk()
+        ->assertSee('Check your inbox')
+        ->assertSee('sam@example.com');
+});
