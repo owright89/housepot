@@ -3,6 +3,8 @@
 use App\Actions\Households\CreateHousehold;
 use App\Enums\HouseholdRole;
 use App\Models\Household;
+use App\Support\DemoData;
+use App\Support\Money;
 use Flux\Flux;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
@@ -37,9 +39,25 @@ new #[Title('Households')] class extends Component {
     {
         return Auth::user()
             ->households()
+            ->with(['members' => fn ($query) => $query->orderBy('name')])
             ->withCount('members')
             ->orderBy('name')
             ->get();
+    }
+
+    /**
+     * Placeholder balance and monthly total for a household card, until the ledger exists (step 5).
+     *
+     * @return array{balance: int, month: int}
+     */
+    public function demoFigures(Household $household): array
+    {
+        $bills = DemoData::bills($household->members);
+
+        return [
+            'balance' => DemoData::yourBalance(DemoData::balances($household->members, Auth::user())),
+            'month' => $household->members_count > 1 ? DemoData::monthTotal($bills) : 0,
+        ];
     }
 
     /**
@@ -62,8 +80,8 @@ new #[Title('Households')] class extends Component {
 <section class="w-full">
     <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-            <flux:heading size="xl" level="1">{{ __('Households') }}</flux:heading>
-            <flux:subheading>{{ __('The homes you share costs with.') }}</flux:subheading>
+            <flux:heading size="xl" level="1" class="text-2xl! font-extrabold!">{{ __('Households') }}</flux:heading>
+            <flux:text class="mt-1">{{ __('The homes you share costs with.') }}</flux:text>
         </div>
 
         @if ($this->households->isNotEmpty())
@@ -77,8 +95,8 @@ new #[Title('Households')] class extends Component {
 
     @if ($this->households->isEmpty())
         <flux:card class="mx-auto flex max-w-lg flex-col items-center gap-4 py-12 text-center">
-            <div class="rounded-full bg-zinc-100 p-3 dark:bg-zinc-700">
-                <flux:icon.home-modern class="size-6 text-zinc-500 dark:text-zinc-300" aria-hidden="true" />
+            <div class="rounded-(--radius-control) bg-primary-soft p-3">
+                <flux:icon.home-modern class="size-6 text-primary-text" aria-hidden="true" />
             </div>
 
             <div class="space-y-1">
@@ -99,28 +117,87 @@ new #[Title('Households')] class extends Component {
             </flux:text>
         </flux:card>
     @else
+        {{-- PLACEHOLDER: pending invites arrive with invite links (4b). Buttons do nothing yet. --}}
+        @php($invite = DemoData::pendingInvite())
+        <div class="mb-6 flex flex-col gap-3 rounded-(--radius-card) border border-line bg-primary-soft p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex items-center gap-3">
+                <span class="flex size-9 shrink-0 items-center justify-center rounded-(--radius-control) bg-card text-primary-text">
+                    <flux:icon.home variant="micro" aria-hidden="true" />
+                </span>
+                <div>
+                    <p class="text-sm font-bold text-ink">{{ __(':inviter invited you to join :household', ['inviter' => $invite['inviter'], 'household' => $invite['household']]) }}</p>
+                    <p class="text-xs text-muted">{{ trans_choice(':count member|:count members', $invite['members']) }} · {{ $invite['currency'] }} · {{ __('Invited :when', ['when' => $invite['when']]) }}</p>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <flux:button>{{ __('Decline') }}</flux:button>
+                <flux:button variant="primary">{{ __('Accept') }}</flux:button>
+            </div>
+        </div>
+
         <ul class="grid gap-4 md:grid-cols-2 xl:grid-cols-3" role="list">
             @foreach ($this->households as $household)
+                @php($figures = $this->demoFigures($household))
                 <li wire:key="household-{{ $household->id }}">
-                    <a href="{{ route('households.show', $household) }}" wire:navigate class="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400">
-                        <flux:card class="flex h-full flex-col gap-3 transition hover:bg-zinc-50 dark:hover:bg-zinc-700">
+                    <a href="{{ route('households.show', $household) }}" wire:navigate class="group block h-full rounded-(--radius-card)">
+                        <flux:card class="flex h-full flex-col gap-4 transition-colors group-hover:bg-subtle">
                             <div class="flex items-start justify-between gap-3">
-                                <flux:heading size="lg" level="2" class="break-words">{{ $household->name }}</flux:heading>
+                                <div class="min-w-0">
+                                    <flux:heading size="lg" level="2" class="break-words font-bold!">{{ $household->name }}</flux:heading>
+                                    <p class="mt-0.5 text-sm text-muted">
+                                        {{ $household->currency }} · {{ trans_choice(':count member|:count members', $household->members_count) }}
+                                    </p>
+                                </div>
 
-                                <flux:badge size="sm" :color="$household->membership->role === HouseholdRole::Owner ? 'lime' : 'zinc'">
+                                <x-chip :variant="$household->membership->role === HouseholdRole::Owner ? 'primary' : 'neutral'">
                                     {{ ucfirst($household->membership->role->value) }}
-                                </flux:badge>
+                                </x-chip>
                             </div>
 
-                            <flux:text class="flex items-center gap-2">
-                                <span>{{ $household->currency }}</span>
-                                <span aria-hidden="true">·</span>
-                                <span>{{ trans_choice(':count member|:count members', $household->members_count) }}</span>
-                            </flux:text>
+                            @if ($household->members_count > 1)
+                                <div class="flex -space-x-1">
+                                    @foreach ($household->members->take(5) as $member)
+                                        <x-avatar :user="$member" class="ring-2 ring-card" />
+                                    @endforeach
+                                </div>
+                            @else
+                                <div class="flex items-center gap-2">
+                                    <x-avatar :user="$household->members->first()" />
+                                    <span class="text-sm text-muted">{{ __('Invite your housemates') }}</span>
+                                </div>
+                            @endif
+
+                            {{-- PLACEHOLDER figures until the ledger exists (step 5). --}}
+                            <div class="mt-auto flex items-end justify-between border-t border-line pt-3">
+                                <div>
+                                    <p class="text-xs text-muted">{{ __('Your balance') }}</p>
+                                    <p @class(['text-base font-bold', 'text-primary-text' => $figures['balance'] > 0, 'text-coral' => $figures['balance'] < 0, 'text-ink' => $figures['balance'] === 0])>
+                                        {{ Money::signed($figures['balance'], $household->currency) }}
+                                    </p>
+                                </div>
+                                <div class="text-end">
+                                    <p class="text-xs text-muted">{{ __('This month') }}</p>
+                                    <p class="text-base font-bold text-ink">
+                                        {{ $figures['month'] > 0 ? Money::format($figures['month'], $household->currency) : __('No bills yet') }}
+                                    </p>
+                                </div>
+                            </div>
                         </flux:card>
                     </a>
                 </li>
             @endforeach
+
+            <li>
+                <flux:modal.trigger name="create-household">
+                    <button type="button" class="flex h-full min-h-48 w-full flex-col items-center justify-center gap-2 rounded-(--radius-card) border border-dashed border-line p-6 text-center transition-colors hover:bg-subtle">
+                        <span class="flex size-9 items-center justify-center rounded-(--radius-control) bg-subtle text-muted">
+                            <flux:icon.plus variant="micro" aria-hidden="true" />
+                        </span>
+                        <span class="text-sm font-bold text-ink">{{ __('Start a new household') }}</span>
+                        <span class="text-xs text-muted">{{ __('Add your home, then invite everyone') }}</span>
+                    </button>
+                </flux:modal.trigger>
+            </li>
         </ul>
     @endif
 

@@ -8,31 +8,93 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*
+ * HousePot theme. The palette lives in CLAUDE.md (Conventions → UI theme).
+ *
+ * 1. Semantic tokens (--hp-*) switch between light and dark.
+ * 2. @theme inline turns them into utilities: bg-canvas, bg-card, text-ink, text-muted,
+ *    text-primary, bg-primary-soft, text-coral, bg-coral-soft, border-line...
+ * 3. The zinc scale and accent are remapped so Flux components pick up the palette
+ *    without editing each one.
+ */
+
+:root {
+    --hp-canvas: #F6F8F7;
+    --hp-sidebar: #FFFFFF;
+    --hp-card: #FFFFFF;
+    --hp-line: #E3E8E5;
+    --hp-subtle: #EEF3F0;
+    --hp-ink: #15201B;
+    --hp-muted: #5B6B64;
+    --hp-primary: #157A55;
+    --hp-primary-text: #157A55;
+    --hp-primary-soft: #E3F2EB;
+    --hp-coral: #B23A17;
+    --hp-coral-soft: #FCE9E3;
+    /* Form control edges need 3:1 against the card (WCAG 1.4.11); --hp-line is decorative only. */
+    --hp-control-line: #7F8F88;
+}
+
+.dark {
+    --hp-canvas: #111916;
+    --hp-sidebar: #15201B;
+    --hp-card: #1A2620;
+    --hp-line: #2A3832;
+    --hp-subtle: #22302A;
+    --hp-ink: #EEF3F0;
+    --hp-muted: #9DB0A7;
+    --hp-primary: #157A55;
+    --hp-primary-text: #4CC593;
+    --hp-primary-soft: #173A2C;
+    --hp-coral: #FF8466;
+    --hp-coral-soft: #3A211A;
+    --hp-control-line: #647770;
+}
+
+@theme inline {
+    --color-canvas: var(--hp-canvas);
+    --color-sidebar: var(--hp-sidebar);
+    --color-card: var(--hp-card);
+    --color-line: var(--hp-line);
+    --color-subtle: var(--hp-subtle);
+    --color-ink: var(--hp-ink);
+    --color-muted: var(--hp-muted);
+    --color-primary: var(--hp-primary);
+    --color-primary-text: var(--hp-primary-text);
+    --color-primary-soft: var(--hp-primary-soft);
+    --color-coral: var(--hp-coral);
+    --color-coral-soft: var(--hp-coral-soft);
+}
+
 @theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
 
-    --color-zinc-50: #fafafa;
-    --color-zinc-100: #f5f5f5;
-    --color-zinc-200: #e5e5e5;
-    --color-zinc-300: #d4d4d4;
-    --color-zinc-400: #a3a3a3;
-    --color-zinc-500: #737373;
-    --color-zinc-600: #525252;
-    --color-zinc-700: #404040;
-    --color-zinc-800: #262626;
-    --color-zinc-900: #171717;
-    --color-zinc-950: #0a0a0a;
+    --radius-card: 16px;
+    --radius-control: 10px;
 
-    --color-accent: var(--color-neutral-800);
-    --color-accent-content: var(--color-neutral-800);
-    --color-accent-foreground: var(--color-white);
+    /* Green-tinted neutrals. Flux uses 500 for muted text in light and 400 in dark. */
+    --color-zinc-50: #F6F8F7;
+    --color-zinc-100: #EEF3F0;
+    --color-zinc-200: #E3E8E5;
+    --color-zinc-300: #C0CCC6;
+    --color-zinc-400: #9DB0A7;
+    --color-zinc-500: #5B6B64;
+    --color-zinc-600: #42524B;
+    --color-zinc-700: #2A3832;
+    --color-zinc-800: #1A2620;
+    --color-zinc-900: #15201B;
+    --color-zinc-950: #111916;
+
+    --color-accent: #157A55;
+    --color-accent-content: #157A55;
+    --color-accent-foreground: #FFFFFF;
 }
 
 @layer theme {
     .dark {
-        --color-accent: var(--color-white);
-        --color-accent-content: var(--color-white);
-        --color-accent-foreground: var(--color-neutral-800);
+        --color-accent: #157A55;
+        --color-accent-content: #4CC593;
+        --color-accent-foreground: #FFFFFF;
     }
 }
 
@@ -43,7 +105,18 @@
     ::before,
     ::backdrop,
     ::file-selector-button {
-        border-color: var(--color-gray-200, currentColor);
+        border-color: var(--hp-line, currentColor);
+    }
+
+    body {
+        @apply bg-canvas text-ink antialiased;
+    }
+
+    a:focus-visible,
+    button:focus-visible,
+    [role='button']:focus-visible {
+        outline: 2px solid var(--hp-primary-text);
+        outline-offset: 2px;
     }
 }
 
@@ -58,9 +131,72 @@
 input:focus[data-flux-control],
 textarea:focus[data-flux-control],
 select:focus[data-flux-control] {
-    @apply outline-hidden ring-2 ring-accent ring-offset-2 ring-offset-accent-foreground;
+    @apply outline-hidden ring-2 ring-accent ring-offset-2 ring-offset-canvas;
 }
 
-/* \[:where(&)\]:size-4 {
-    @apply size-4;
-} */
+/*
+ * Component shapes. These sit outside any layer, so they win over Flux's utility classes.
+ */
+
+/* Cards: 16px radius, 1px border, no shadow. Only the default variant gets the card fill. */
+[data-flux-card] {
+    --flux-card-radius: var(--radius-card);
+    border-radius: var(--radius-card);
+    border-color: var(--hp-line);
+    box-shadow: none;
+}
+
+[data-flux-card]::after {
+    display: none;
+}
+
+[data-flux-card]:not([data-flux-card-variant='filled'], [data-flux-card-variant='muted'], [data-flux-card-variant='soft'], [data-flux-card-variant='outline']) {
+    background-color: var(--hp-card);
+}
+
+/* Buttons and controls at the default size: 44px tall, 10px radius. */
+[data-flux-button].h-10,
+[data-flux-control].h-10 {
+    height: 44px;
+    border-radius: var(--radius-control);
+}
+
+[data-flux-button].h-10[data-flux-button]:is(.w-10, .aspect-square) {
+    width: 44px;
+}
+
+input[data-flux-control],
+textarea[data-flux-control],
+select[data-flux-control],
+button[data-flux-control] {
+    border-color: var(--hp-control-line);
+}
+
+/* Sidebar navigation: 44px items, primary-soft when active. */
+[data-flux-sidebar] {
+    background-color: var(--hp-sidebar);
+    border-color: var(--hp-line);
+}
+
+[data-flux-sidebar-item] {
+    height: 44px;
+    border-radius: var(--radius-control);
+}
+
+[data-flux-sidebar-item][data-current] {
+    background-color: var(--hp-primary-soft);
+    color: var(--hp-primary-text);
+    border-color: transparent;
+    box-shadow: none;
+}
+
+/* Avatars: rounded squares with initials. */
+[data-flux-avatar] {
+    --avatar-radius: var(--radius-control);
+}
+
+/* Modals keep their shadow for elevation but share the card radius. */
+[data-flux-modal] [data-flux-modal-content],
+[data-flux-modal] > dialog {
+    border-radius: var(--radius-card);
+}

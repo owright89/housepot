@@ -70,3 +70,24 @@ test('an archived household shows the callout', function () {
     actingAs($user)->get(route('households.show', $household))
         ->assertSee('This household is archived');
 });
+
+test('only the owner sees the invite buttons', function () {
+    $owner = User::factory()->create();
+    $member = User::factory()->create();
+    $household = Household::factory()->withOwner($owner)->withMember($member)->create();
+
+    actingAs($owner)->get(route('households.show', $household))->assertSee('Invite housemate');
+    actingAs($member)->get(route('households.show', $household))->assertDontSee('Invite housemate');
+});
+
+test('bills can be filtered to paid only', function () {
+    $user = User::factory()->create();
+    $household = Household::factory()->withOwner($user)->create();
+    actingAs($user);
+
+    Livewire\Livewire::test('pages::households.show', ['household' => $household])
+        ->assertSee('Broadband')
+        ->set('filter', 'paid')
+        ->assertSee('Water')
+        ->assertDontSee('Broadband');
+});

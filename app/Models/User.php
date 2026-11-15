@@ -61,6 +61,25 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
     }
 
     /**
+     * The household the user is working in: the last one they opened, or their first by name.
+     */
+    public function currentHousehold(): ?Household
+    {
+        $households = $this->households()->orderBy('name');
+        $lastOpened = session('current_household_id');
+
+        if ($lastOpened !== null) {
+            $household = (clone $households)->whereKey($lastOpened)->first();
+
+            if ($household !== null) {
+                return $household;
+            }
+        }
+
+        return $households->first();
+    }
+
+    /**
      * Current and former households.
      *
      * @return BelongsToMany<Household, $this, Membership, 'membership'>
