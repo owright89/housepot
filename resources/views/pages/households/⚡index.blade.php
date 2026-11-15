@@ -102,22 +102,23 @@ new #[Title('Households')] class extends Component {
         <ul class="grid gap-4 md:grid-cols-2 xl:grid-cols-3" role="list">
             @foreach ($this->households as $household)
                 <li wire:key="household-{{ $household->id }}">
-                    {{-- Becomes a link to the household page once it exists. --}}
-                    <flux:card class="flex h-full flex-col gap-3">
-                        <div class="flex items-start justify-between gap-3">
-                            <flux:heading size="lg" level="2" class="break-words">{{ $household->name }}</flux:heading>
+                    <a href="{{ route('households.show', $household) }}" wire:navigate class="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400">
+                        <flux:card class="flex h-full flex-col gap-3 transition hover:bg-zinc-50 dark:hover:bg-zinc-700">
+                            <div class="flex items-start justify-between gap-3">
+                                <flux:heading size="lg" level="2" class="break-words">{{ $household->name }}</flux:heading>
 
-                            <flux:badge size="sm" :color="$household->membership->role === HouseholdRole::Owner ? 'lime' : 'zinc'">
-                                {{ ucfirst($household->membership->role->value) }}
-                            </flux:badge>
-                        </div>
+                                <flux:badge size="sm" :color="$household->membership->role === HouseholdRole::Owner ? 'lime' : 'zinc'">
+                                    {{ ucfirst($household->membership->role->value) }}
+                                </flux:badge>
+                            </div>
 
-                        <flux:text class="flex items-center gap-2">
-                            <span>{{ $household->currency }}</span>
-                            <span aria-hidden="true">·</span>
-                            <span>{{ trans_choice(':count member|:count members', $household->members_count) }}</span>
-                        </flux:text>
-                    </flux:card>
+                            <flux:text class="flex items-center gap-2">
+                                <span>{{ $household->currency }}</span>
+                                <span aria-hidden="true">·</span>
+                                <span>{{ trans_choice(':count member|:count members', $household->members_count) }}</span>
+                            </flux:text>
+                        </flux:card>
+                    </a>
                 </li>
             @endforeach
         </ul>
