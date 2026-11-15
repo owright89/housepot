@@ -3,6 +3,8 @@
 namespace App\Actions\Expenses;
 
 use App\Enums\AuditEvent;
+use App\Events\BalancesUpdated;
+use App\Events\ExpenseDeleted;
 use App\Ledger\InvalidExpense;
 use App\Ledger\Ledger;
 use App\Ledger\StaleExpense;
@@ -48,6 +50,9 @@ class DeleteExpense
 
             $expense->forceFill(['version' => $expense->version + 1])->save();
             $expense->delete();
+
+            ExpenseDeleted::dispatch($expense, $actor);
+            BalancesUpdated::dispatch($expense->household_id);
         });
     }
 }

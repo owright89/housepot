@@ -3,6 +3,8 @@
 namespace App\Actions\Expenses;
 
 use App\Enums\AuditEvent;
+use App\Events\BalancesUpdated;
+use App\Events\ExpenseUpdated;
 use App\Ledger\InvalidExpense;
 use App\Ledger\Ledger;
 use App\Ledger\StaleExpense;
@@ -52,7 +54,9 @@ class UpdateExpense
                 'version' => $expense->version + 1,
             ])->save();
 
-            if ($data->affectsMoneyComparedTo($before)) {
+            $moneyChanged = $data->affectsMoneyComparedTo($before);
+
+            if ($moneyChanged) {
                 $expense->splits()->delete();
 
                 foreach ($data->shares as $userId => $share) {
@@ -69,6 +73,12 @@ class UpdateExpense
             }
 
             Audit::record($actor, $expense->household, $expense, AuditEvent::Updated, $changes);
+
+            ExpenseUpdated::dispatch($expense, $actor);
+
+            if ($moneyChanged) {
+                BalancesUpdated::dispatch($expense->household_id);
+            }
 
             return $expense;
         });

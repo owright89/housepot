@@ -3,6 +3,8 @@
 namespace App\Actions\Expenses;
 
 use App\Enums\AuditEvent;
+use App\Events\BalancesUpdated;
+use App\Events\ExpenseRecorded;
 use App\Ledger\InvalidExpense;
 use App\Ledger\Ledger;
 use App\Models\Audit;
@@ -44,6 +46,10 @@ class RecordExpense
                 fn ($value) => [null, $value],
                 $data->toAuditArray(),
             ));
+
+            // Sent after the transaction commits (ShouldDispatchAfterCommit).
+            ExpenseRecorded::dispatch($expense, $actor);
+            BalancesUpdated::dispatch($household->id);
 
             return $expense;
         });
