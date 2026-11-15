@@ -128,6 +128,14 @@ class Household extends Model
     }
 
     /**
+     * The household's one live invite link, if there is one.
+     */
+    public function activeInvite(): ?HouseholdInvite
+    {
+        return $this->invites()->usable()->latest('id')->first();
+    }
+
+    /**
      * @return HasMany<JournalEntry, $this>
      */
     public function journalEntries(): HasMany

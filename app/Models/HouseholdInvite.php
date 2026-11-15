@@ -4,10 +4,14 @@ namespace App\Models;
 
 use Database\Factories\HouseholdInviteFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Prunable;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\URL;
 
 /**
  * A single-use, expiring invite link to join a household.
@@ -26,7 +30,13 @@ use Illuminate\Support\Carbon;
 class HouseholdInvite extends Model
 {
     /** @use HasFactory<HouseholdInviteFactory> */
-    use HasFactory;
+    use HasFactory, Prunable;
+
+    /**
+     * Unused invites are deleted this many days after they stop working.
+     * Accepted invites are kept as a record of who invited whom.
+     */
+    public const PRUNE_AFTER_DAYS = 30;
 
     /**
      * Get the attributes that should be cast.
@@ -43,6 +53,36 @@ class HouseholdInvite extends Model
     }
 
     /**
+     * Invites that can still be used: not accepted, revoked or expired. Mirrors isUsable().
+     *
+     * @param  Builder<HouseholdInvite>  $query
+     */
+    #[Scope]
+    protected function usable(Builder $query): void
+    {
+        $query->whereNull('accepted_at')
+            ->whereNull('revoked_at')
+            ->where('expires_at', '>', now());
+    }
+
+    /**
+     * Unused invites that stopped working (revoked or expired) more than PRUNE_AFTER_DAYS ago.
+     * Run by `php artisan model:prune`, scheduled daily in routes/console.php.
+     *
+     * @return Builder<HouseholdInvite>
+     */
+    public function prunable(): Builder
+    {
+        $cutoff = now()->subDays(self::PRUNE_AFTER_DAYS);
+
+        return self::query()
+            ->whereNull('accepted_at')
+            ->where(fn (Builder $query) => $query
+                ->where('revoked_at', '<', $cutoff)
+                ->orWhere('expires_at', '<', $cutoff));
+    }
+
+    /**
      * Whether the invite can still be used: not accepted, revoked or expired.
      */
     public function isUsable(): bool
@@ -50,6 +90,14 @@ class HouseholdInvite extends Model
         return $this->accepted_at === null
             && $this->revoked_at === null
             && $this->expires_at->isFuture();
+    }
+
+    /**
+     * The signed link to share. Anyone signed in who opens it joins the household.
+     */
+    public function url(): string
+    {
+        return URL::signedRoute('invites.accept', ['invite' => $this]);
     }
 
     /**

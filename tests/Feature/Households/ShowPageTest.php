@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Household;
+use App\Models\HouseholdInvite;
 use App\Models\User;
 
 use function Pest\Laravel\actingAs;
@@ -90,4 +91,87 @@ test('bills can be filtered to paid only', function () {
         ->set('filter', 'paid')
         ->assertSee('Water')
         ->assertDontSee('Broadband');
+});
+
+test('owner opening the invite modal gets a link', function () {
+    $owner = User::factory()->create();
+    $household = Household::factory()->withOwner($owner)->create();
+    actingAs($owner);
+
+    $component = Livewire\Livewire::test('pages::households.show', ['household' => $household])
+        ->call('openInvite')
+        ->assertHasNoErrors();
+
+    $invite = $household->invites()->sole();
+
+    expect($invite->invited_by)->toBe($owner->id)
+        ->and($component->get('inviteUrl'))->toBe($invite->url());
+});
+
+test('opening the invite modal again reuses the live link', function () {
+    $owner = User::factory()->create();
+    $household = Household::factory()->withOwner($owner)->create();
+    actingAs($owner);
+
+    $component = Livewire\Livewire::test('pages::households.show', ['household' => $household])
+        ->call('openInvite');
+    $firstUrl = $component->get('inviteUrl');
+
+    $component->call('openInvite');
+
+    expect($household->invites()->count())->toBe(1)
+        ->and($component->get('inviteUrl'))->toBe($firstUrl);
+});
+
+test('a new link replaces the old one, which stops working', function () {
+    $owner = User::factory()->create();
+    $household = Household::factory()->withOwner($owner)->create();
+    actingAs($owner);
+
+    $component = Livewire\Livewire::test('pages::households.show', ['household' => $household])
+        ->call('openInvite');
+    $old = $household->invites()->sole();
+
+    $component->call('newInviteLink');
+
+    expect($old->refresh()->isUsable())->toBeFalse()
+        ->and($household->invites()->usable()->count())->toBe(1)
+        ->and($component->get('inviteUrl'))->toBe($household->activeInvite()->url());
+});
+
+test('a used link is not shown again; the next person gets a fresh one', function () {
+    $owner = User::factory()->create();
+    $household = Household::factory()->withOwner($owner)->create();
+    $used = HouseholdInvite::factory()->for($household)->accepted()->create();
+    actingAs($owner);
+
+    $component = Livewire\Livewire::test('pages::households.show', ['household' => $household])
+        ->call('openInvite');
+
+    expect($component->get('inviteUrl'))->not->toBe($used->url())
+        ->and($household->invites()->usable()->count())->toBe(1);
+});
+
+test('a member cannot open or replace an invite link', function (string $method) {
+    $member = User::factory()->create();
+    $household = Household::factory()->withOwner()->withMember($member)->create();
+    actingAs($member);
+
+    Livewire\Livewire::test('pages::households.show', ['household' => $household])
+        ->call($method)
+        ->assertForbidden();
+
+    expect($household->invites()->count())->toBe(0);
+})->with(['openInvite', 'newInviteLink']);
+
+test('the owner of an archived household cannot create an invite', function () {
+    $owner = User::factory()->create();
+    $household = Household::factory()->archived()->withOwner($owner)->create();
+    actingAs($owner);
+
+    Livewire\Livewire::test('pages::households.show', ['household' => $household])
+        ->call('openInvite')
+        ->assertForbidden();
+
+    expect($household->invites()->count())->toBe(0);
 });

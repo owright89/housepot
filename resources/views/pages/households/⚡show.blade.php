@@ -1,11 +1,13 @@
 <?php
 
+use App\Actions\Households\CreateInvite;
 use App\Enums\HouseholdRole;
 use App\Models\Expense;
 use App\Models\Household;
 use App\Models\User;
 use App\Support\DemoData;
 use App\Support\Money;
+use Flux\Flux;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
@@ -20,6 +22,11 @@ new class extends Component
      * Bills table filter: all, unpaid or paid.
      */
     public string $filter = 'all';
+
+    /**
+     * The link from the most recent invite, shown in the invite modal.
+     */
+    public ?string $inviteUrl = null;
 
     public function mount(): void
     {
@@ -62,6 +69,32 @@ new class extends Component
     }
 
     /**
+     * Show the household's live invite link, creating one only if none exists.
+     * Opening the modal repeatedly reuses the same link, so it never piles up rows.
+     */
+    public function openInvite(CreateInvite $createInvite): void
+    {
+        $this->authorize('invite', $this->household);
+
+        $invite = $this->household->activeInvite() ?? $createInvite->handle(Auth::user(), $this->household);
+        $this->inviteUrl = $invite->url();
+
+        Flux::modal('invite-housemate')->show();
+    }
+
+    /**
+     * Replace the live link with a new one. The old link stops working (it is revoked).
+     */
+    public function newInviteLink(CreateInvite $createInvite): void
+    {
+        $this->authorize('invite', $this->household);
+
+        $this->inviteUrl = $createInvite->handle(Auth::user(), $this->household)->url();
+
+        Flux::toast(text: __('New link created. The old one no longer works.'));
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     public function filteredBills(): array
@@ -100,13 +133,20 @@ new class extends Component
 
         <div class="flex gap-2">
             @can('invite', $household)
-                <flux:button icon="user-plus" data-test="invite-button">{{ __('Invite') }}</flux:button>
+                <flux:button icon="user-plus" wire:click="openInvite" data-test="invite-button">{{ __('Invite') }}</flux:button>
             @endcan
             @can('create', [Expense::class, $household])
                 <flux:button variant="primary" icon="plus" data-test="add-bill-button">{{ __('Add bill') }}</flux:button>
             @endcan
         </div>
     </div>
+
+    @if (session('invite_status'))
+        <flux:callout variant="success" icon="check-circle" class="mb-6" data-test="invite-status">
+            <flux:callout.heading>{{ session('invite_status') }}</flux:callout.heading>
+            <flux:callout.text>{{ __('You can now see and add the household\'s bills.') }}</flux:callout.text>
+        </flux:callout>
+    @endif
 
     @if ($household->isArchived())
         <flux:callout variant="secondary" icon="archive-box" class="mb-6">
@@ -250,9 +290,44 @@ new class extends Component
                 </ul>
 
                 @can('invite', $household)
-                    <flux:button icon="user-plus" class="mt-2 w-full">{{ __('Invite housemate') }}</flux:button>
+                    <flux:button icon="user-plus" class="mt-2 w-full" wire:click="openInvite">{{ __('Invite housemate') }}</flux:button>
                 @endcan
             </flux:card>
         </div>
     </div>
+    @can('invite', $household)
+        <flux:modal name="invite-housemate" class="w-full max-w-md">
+            <div class="space-y-6">
+                <div>
+                    <flux:heading size="lg">{{ __('Invite a housemate') }}</flux:heading>
+                    <flux:text class="mt-2">
+                        {{ __('Send this link to one person. It works once and expires in :days days.', ['days' => CreateInvite::EXPIRES_AFTER_DAYS]) }}
+                        {{ __('Once they\'ve joined, open this again for a link for the next person.') }}
+                    </flux:text>
+                </div>
+
+                <flux:input
+                    :value="$inviteUrl"
+                    :label="__('Invite link')"
+                    readonly
+                    copyable
+                    data-test="invite-url"
+                />
+
+                <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <flux:button variant="ghost" icon="arrow-path" wire:click="newInviteLink" data-test="new-invite-link">
+                        {{ __('New link') }}
+                    </flux:button>
+
+                    <flux:modal.close>
+                        <flux:button variant="primary">{{ __('Done') }}</flux:button>
+                    </flux:modal.close>
+                </div>
+
+                <flux:text size="sm">
+                    {{ __('Sent it to the wrong person? Use New link and the old one stops working.') }}
+                </flux:text>
+            </div>
+        </flux:modal>
+    @endcan
 </section>

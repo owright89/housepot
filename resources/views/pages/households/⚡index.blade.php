@@ -93,6 +93,13 @@ new #[Title('Households')] class extends Component {
         @endif
     </div>
 
+    @if (session('invite_error'))
+        <flux:callout variant="danger" icon="exclamation-triangle" class="mb-6" data-test="invite-error">
+            <flux:callout.heading>{{ __('Couldn\'t join that household') }}</flux:callout.heading>
+            <flux:callout.text>{{ session('invite_error') }} {{ __('Ask the owner for a new link.') }}</flux:callout.text>
+        </flux:callout>
+    @endif
+
     @if ($this->households->isEmpty())
         <flux:card class="mx-auto flex max-w-lg flex-col items-center gap-4 py-12 text-center">
             <div class="rounded-(--radius-control) bg-primary-soft p-3">
