@@ -11,3 +11,6 @@ Artisan::command('inspire', function () {
 
 // Delete unused invite links that stopped working over a month ago (HouseholdInvite::prunable()).
 Schedule::command('model:prune', ['--model' => [HouseholdInvite::class]])->daily();
+
+// Horizon's dashboard graphs (throughput, wait times) are built from these snapshots.
+Schedule::command('horizon:snapshot')->everyFiveMinutes();

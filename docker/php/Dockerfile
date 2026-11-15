@@ -9,6 +9,7 @@ ARG INSTALL_XDEBUG=false
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git unzip libicu-dev libzip-dev libpq-dev \
     && docker-php-ext-install intl zip opcache pcntl pdo_pgsql bcmath \
+    && pecl install redis && docker-php-ext-enable redis \
     && if [ "$INSTALL_XDEBUG" = "true" ]; then pecl install xdebug && docker-php-ext-enable xdebug; fi \
     && rm -rf /var/lib/apt/lists/*
 

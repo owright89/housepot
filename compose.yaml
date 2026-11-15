@@ -21,10 +21,23 @@ services:
     depends_on:
       pgsql:
         condition: service_healthy
+      redis:
+        condition: service_healthy
 
-  queue:
+  # Runs and supervises the queue workers (Redis). Dashboard at /horizon.
+  horizon:
     <<: *base
-    command: php artisan queue:listen --tries=3
+    command: php artisan horizon
+    restart: unless-stopped
+    depends_on:
+      pgsql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    <<: *base
+    command: php artisan schedule:work
     restart: unless-stopped
     depends_on:
       pgsql:
@@ -57,6 +70,16 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   web:
     image: nginx:1.30.6-alpine
     ports:
@@ -83,3 +106,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
