@@ -81,18 +81,6 @@ test('only the owner sees the invite buttons', function () {
     actingAs($member)->get(route('households.show', $household))->assertDontSee('Invite housemate');
 });
 
-test('bills can be filtered to paid only', function () {
-    $user = User::factory()->create();
-    $household = Household::factory()->withOwner($user)->create();
-    actingAs($user);
-
-    Livewire\Livewire::test('pages::households.show', ['household' => $household])
-        ->assertSee('Broadband')
-        ->set('filter', 'paid')
-        ->assertSee('Water')
-        ->assertDontSee('Broadband');
-});
-
 test('owner opening the invite modal gets a link', function () {
     $owner = User::factory()->create();
     $household = Household::factory()->withOwner($owner)->create();

@@ -1,11 +1,17 @@
 <?php
 
+use App\Actions\Expenses\DeleteExpense;
+use App\Actions\Expenses\RecordExpense;
+use App\Actions\Expenses\UpdateExpense;
 use App\Actions\Households\CreateInvite;
 use App\Enums\HouseholdRole;
+use App\Ledger\HouseholdSummary;
+use App\Ledger\InvalidExpense;
+use App\Ledger\StaleExpense;
+use App\Livewire\Forms\ExpenseForm;
 use App\Models\Expense;
 use App\Models\Household;
 use App\Models\User;
-use App\Support\DemoData;
 use App\Support\Money;
 use Flux\Flux;
 use Illuminate\Database\Eloquent\Collection;
@@ -19,7 +25,7 @@ new class extends Component
     public Household $household;
 
     /**
-     * Bills table filter: all, unpaid or paid.
+     * Bills table filter: all, you-paid or you-owe.
      */
     public string $filter = 'all';
 
@@ -27,6 +33,13 @@ new class extends Component
      * The link from the most recent invite, shown in the invite modal.
      */
     public ?string $inviteUrl = null;
+
+    public ExpenseForm $form;
+
+    /** The bill waiting for delete confirmation, and the version that was shown. */
+    public ?int $deletingId = null;
+
+    public int $deletingVersion = 0;
 
     public function mount(): void
     {
@@ -49,23 +62,135 @@ new class extends Component
     }
 
     /**
-     * Placeholder bills and balances until the ledger exists (step 5).
+     * Newest bills first, with who paid and the splits.
      *
-     * @return array<string, mixed>
+     * @return Collection<int, Expense>
      */
     #[Computed]
-    public function demo(): array
+    public function bills(): Collection
     {
-        $bills = DemoData::bills($this->members);
-        $balances = DemoData::balances($this->members, Auth::user());
+        return $this->household->expenses()
+            ->with(['payer', 'splits'])
+            ->orderByDesc('spent_on')
+            ->orderByDesc('id')
+            ->get();
+    }
 
-        return [
-            'bills' => $bills,
-            'balances' => $balances,
-            'monthTotal' => DemoData::monthTotal($bills),
-            'yourShare' => DemoData::yourShare($bills),
-            'yourBalance' => DemoData::yourBalance($balances),
-        ];
+    #[Computed]
+    public function summary(): HouseholdSummary
+    {
+        return HouseholdSummary::for($this->household, Auth::user());
+    }
+
+    /**
+     * The viewer's share of a bill, in pence.
+     */
+    public function shareOf(Expense $bill): int
+    {
+        return (int) $bill->splits->firstWhere('user_id', Auth::id())?->amount;
+    }
+
+    /**
+     * you-paid | you-owe | not-included, from the viewer's point of view.
+     */
+    public function statusOf(Expense $bill): string
+    {
+        return match (true) {
+            $bill->paid_by === Auth::id() => 'you-paid',
+            $this->shareOf($bill) > 0 => 'you-owe',
+            default => 'not-included',
+        };
+    }
+
+    /**
+     * @return Collection<int, Expense>
+     */
+    public function filteredBills(): Collection
+    {
+        if ($this->filter === 'all') {
+            return $this->bills;
+        }
+
+        return $this->bills->filter(fn (Expense $bill) => $this->statusOf($bill) === $this->filter)->values();
+    }
+
+    public function addBill(): void
+    {
+        $this->authorize('create', [Expense::class, $this->household]);
+
+        $this->form->start($this->household, Auth::user());
+
+        Flux::modal('bill-form')->show();
+    }
+
+    public function editBill(int $expenseId): void
+    {
+        $expense = $this->household->expenses()->findOrFail($expenseId);
+        $this->authorize('update', $expense);
+
+        $this->form->edit($expense);
+
+        Flux::modal('bill-form')->show();
+    }
+
+    public function saveBill(RecordExpense $recordExpense, UpdateExpense $updateExpense): void
+    {
+        $data = $this->form->toData($this->household);
+
+        try {
+            if ($this->form->expenseId === null) {
+                $this->authorize('create', [Expense::class, $this->household]);
+                $recordExpense->handle(Auth::user(), $this->household, $data);
+                $message = __('Bill added.');
+            } else {
+                $expense = $this->household->expenses()->findOrFail($this->form->expenseId);
+                $this->authorize('update', $expense);
+                $updateExpense->handle(Auth::user(), $expense, $this->form->version, $data);
+                $message = __('Bill updated.');
+            }
+        } catch (InvalidExpense $e) {
+            $this->addError('form.split', $e->getMessage());
+
+            return;
+        } catch (StaleExpense $e) {
+            Flux::modal('bill-form')->close();
+            Flux::toast(variant: 'danger', text: $e->getMessage());
+            $this->refreshFigures();
+
+            return;
+        }
+
+        Flux::modal('bill-form')->close();
+        Flux::toast(variant: 'success', text: $message);
+        $this->refreshFigures();
+    }
+
+    public function confirmDelete(int $expenseId): void
+    {
+        $expense = $this->household->expenses()->findOrFail($expenseId);
+        $this->authorize('delete', $expense);
+
+        $this->deletingId = $expense->id;
+        $this->deletingVersion = $expense->version;
+
+        Flux::modal('delete-bill')->show();
+    }
+
+    public function deleteBill(DeleteExpense $deleteExpense): void
+    {
+        $expense = $this->household->expenses()->findOrFail($this->deletingId);
+        $this->authorize('delete', $expense);
+
+        try {
+            $deleteExpense->handle(Auth::user(), $expense, $this->deletingVersion);
+            Flux::toast(variant: 'success', text: __('Bill deleted.'));
+        } catch (InvalidExpense|StaleExpense $e) {
+            Flux::toast(variant: 'danger', text: $e->getMessage());
+        }
+
+        Flux::modal('delete-bill')->close();
+        $this->deletingId = null;
+        $this->refreshFigures();
     }
 
     /**
@@ -94,16 +219,9 @@ new class extends Component
         Flux::toast(text: __('New link created. The old one no longer works.'));
     }
 
-    /**
-     * @return list<array<string, mixed>>
-     */
-    public function filteredBills(): array
+    private function refreshFigures(): void
     {
-        return array_values(array_filter($this->demo['bills'], fn (array $bill) => match ($this->filter) {
-            'unpaid' => $bill['status'] !== 'paid',
-            'paid' => $bill['status'] === 'paid',
-            default => true,
-        }));
+        unset($this->bills, $this->summary);
     }
 
     public function render()
@@ -114,7 +232,7 @@ new class extends Component
 ?>
 
 @php($currency = $household->currency)
-@php($demo = $this->demo)
+@php($summary = $this->summary)
 @php($isOwner = $household->roleOf(auth()->user()) === HouseholdRole::Owner)
 
 <section class="w-full">
@@ -136,7 +254,7 @@ new class extends Component
                 <flux:button icon="user-plus" wire:click="openInvite" data-test="invite-button">{{ __('Invite') }}</flux:button>
             @endcan
             @can('create', [Expense::class, $household])
-                <flux:button variant="primary" icon="plus" data-test="add-bill-button">{{ __('Add bill') }}</flux:button>
+                <flux:button variant="primary" icon="plus" wire:click="addBill" data-test="add-bill-button">{{ __('Add bill') }}</flux:button>
             @endcan
         </div>
     </div>
@@ -155,23 +273,23 @@ new class extends Component
         </flux:callout>
     @endif
 
-    {{-- PLACEHOLDER figures until the ledger exists (step 5). --}}
     <div class="mb-6 grid gap-4 sm:grid-cols-3">
         <flux:card>
             <flux:text size="sm">{{ __('Total this month') }}</flux:text>
-            <p class="mt-1 text-2xl font-extrabold text-ink">{{ Money::format($demo['monthTotal'], $currency) }}</p>
+            <p class="mt-1 text-2xl font-extrabold text-ink" data-test="month-total">{{ Money::format($summary->monthTotal, $currency) }}</p>
+            <flux:text size="sm" class="mt-1">{{ trans_choice(':count bill|:count bills', $summary->monthBillCount) }}</flux:text>
         </flux:card>
         <flux:card>
-            <flux:text size="sm">{{ __('Your share') }}</flux:text>
-            <p class="mt-1 text-2xl font-extrabold text-ink">{{ Money::format($demo['yourShare'], $currency) }}</p>
+            <flux:text size="sm">{{ __('Your share this month') }}</flux:text>
+            <p class="mt-1 text-2xl font-extrabold text-ink" data-test="your-share">{{ Money::format($summary->yourMonthShare, $currency) }}</p>
         </flux:card>
         <flux:card>
             <flux:text size="sm">{{ __('Your balance') }}</flux:text>
-            <p @class(['mt-1 text-2xl font-extrabold', 'text-primary-text' => $demo['yourBalance'] > 0, 'text-coral' => $demo['yourBalance'] < 0, 'text-ink' => $demo['yourBalance'] === 0])>
-                {{ Money::signed($demo['yourBalance'], $currency) }}
+            <p @class(['mt-1 text-2xl font-extrabold', 'text-primary-text' => $summary->yourBalance > 0, 'text-coral' => $summary->yourBalance < 0, 'text-ink' => $summary->yourBalance === 0]) data-test="your-balance">
+                {{ Money::signed($summary->yourBalance, $currency) }}
             </p>
             <flux:text size="sm" class="mt-1">
-                {{ $demo['yourBalance'] > 0 ? __('You\'re owed overall') : ($demo['yourBalance'] < 0 ? __('You owe overall') : __('All square')) }}
+                {{ $summary->yourBalance > 0 ? __('You\'re owed overall') : ($summary->yourBalance < 0 ? __('You owe overall') : __('All square')) }}
             </flux:text>
         </flux:card>
     </div>
@@ -180,10 +298,10 @@ new class extends Component
         {{-- Bills --}}
         <flux:card class="p-0! lg:col-span-2" id="bills">
             <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
-                <flux:heading size="lg" level="2">{{ __('Bills · :month', ['month' => now()->format('F')]) }}</flux:heading>
+                <flux:heading size="lg" level="2">{{ __('Bills') }}</flux:heading>
 
                 <div class="flex rounded-(--radius-control) bg-subtle p-1" role="group" aria-label="{{ __('Filter bills') }}">
-                    @foreach (['all' => __('All'), 'unpaid' => __('Unpaid'), 'paid' => __('Paid')] as $value => $label)
+                    @foreach (['all' => __('All'), 'you-paid' => __('You paid'), 'you-owe' => __('Your share')] as $value => $label)
                         <button
                             type="button"
                             wire:click="$set('filter', '{{ $value }}')"
@@ -198,73 +316,103 @@ new class extends Component
                 </div>
             </div>
 
-            <div class="overflow-x-auto border-t border-line">
-                <table class="w-full min-w-[36rem] text-sm">
-                    <thead>
-                        <tr class="text-xs text-muted">
-                            <th scope="col" class="px-5 py-2 text-start font-medium">{{ __('Bill') }}</th>
-                            <th scope="col" class="px-3 py-2 text-start font-medium">{{ __('Paid by') }}</th>
-                            <th scope="col" class="px-3 py-2 text-start font-medium">{{ __('Due') }}</th>
-                            <th scope="col" class="px-3 py-2 text-end font-medium">{{ __('Amount') }}</th>
-                            <th scope="col" class="px-3 py-2 text-end font-medium">{{ __('Your share') }}</th>
-                            <th scope="col" class="px-5 py-2 text-end font-medium">{{ __('Status') }}</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-line border-t border-line">
-                        @forelse ($this->filteredBills() as $bill)
-                            <tr>
-                                <td class="px-5 py-3 font-bold text-ink">{{ $bill['name'] }}</td>
-                                <td class="px-3 py-3">
-                                    <span class="flex items-center gap-2 text-muted">
-                                        <x-avatar :user="$bill['payer']" size="sm" />
-                                        {{ $bill['payer']->is(auth()->user()) ? __('You') : Str::before($bill['payer']->name, ' ') }}
-                                    </span>
-                                </td>
-                                <td class="px-3 py-3 text-muted">{{ Str::after($bill['due'], ' ') }}</td>
-                                <td class="px-3 py-3 text-end text-muted">{{ Money::format($bill['total'], $currency) }}</td>
-                                <td class="px-3 py-3 text-end font-bold text-ink">{{ Money::format($bill['share'], $currency) }}</td>
-                                <td class="px-5 py-3 text-end"><x-bill-status :status="$bill['status']" /></td>
+            @if ($this->bills->isEmpty())
+                <div class="flex flex-col items-center gap-3 border-t border-line px-5 py-12 text-center">
+                    <span class="flex size-10 items-center justify-center rounded-(--radius-control) bg-subtle text-muted" aria-hidden="true">
+                        <flux:icon.document-text variant="mini" />
+                    </span>
+                    <p class="font-bold text-ink">{{ __('No bills yet') }}</p>
+                    <p class="max-w-xs text-sm text-muted">{{ __('Add a bill once someone has paid it, and HousePot works out everyone\'s share.') }}</p>
+                    @can('create', [Expense::class, $household])
+                        <flux:button variant="primary" icon="plus" wire:click="addBill">{{ __('Add the first bill') }}</flux:button>
+                    @endcan
+                </div>
+            @else
+                <div class="overflow-x-auto border-t border-line">
+                    <table class="w-full min-w-[40rem] text-sm">
+                        <thead>
+                            <tr class="text-xs text-muted">
+                                <th scope="col" class="px-5 py-2 text-start font-medium">{{ __('Bill') }}</th>
+                                <th scope="col" class="px-3 py-2 text-start font-medium">{{ __('Paid by') }}</th>
+                                <th scope="col" class="px-3 py-2 text-start font-medium">{{ __('Date') }}</th>
+                                <th scope="col" class="px-3 py-2 text-end font-medium">{{ __('Amount') }}</th>
+                                <th scope="col" class="px-3 py-2 text-end font-medium">{{ __('Your share') }}</th>
+                                <th scope="col" class="px-3 py-2 text-end font-medium">{{ __('Status') }}</th>
+                                <th scope="col" class="w-10 px-3 py-2"><span class="sr-only">{{ __('Actions') }}</span></th>
                             </tr>
-                        @empty
-                            <tr>
-                                <td colspan="6" class="px-5 py-8 text-center text-muted">{{ __('No bills here.') }}</td>
-                            </tr>
-                        @endforelse
-                    </tbody>
-                </table>
-            </div>
+                        </thead>
+                        <tbody class="divide-y divide-line border-t border-line">
+                            @forelse ($this->filteredBills() as $bill)
+                                <tr wire:key="bill-{{ $bill->id }}">
+                                    <td class="px-5 py-3 font-bold text-ink">{{ $bill->description }}</td>
+                                    <td class="px-3 py-3">
+                                        <span class="flex items-center gap-2 text-muted">
+                                            <x-avatar :user="$bill->payer" size="sm" />
+                                            {{ $bill->payer->is(auth()->user()) ? __('You') : Str::before($bill->payer->name, ' ') }}
+                                        </span>
+                                    </td>
+                                    <td class="px-3 py-3 whitespace-nowrap text-muted">{{ $bill->spent_on->format('j M') }}</td>
+                                    <td class="px-3 py-3 text-end text-muted">{{ Money::format($bill->amount, $currency) }}</td>
+                                    <td class="px-3 py-3 text-end font-bold text-ink">{{ Money::format($this->shareOf($bill), $currency) }}</td>
+                                    <td class="px-3 py-3 text-end"><x-bill-status :status="$this->statusOf($bill)" /></td>
+                                    <td class="px-3 py-3 text-end">
+                                        @can('update', $bill)
+                                            <flux:dropdown align="end">
+                                                <flux:button variant="ghost" size="sm" icon="ellipsis-horizontal" :aria-label="__('Actions for :bill', ['bill' => $bill->description])" />
+                                                <flux:menu>
+                                                    <flux:menu.item icon="pencil-square" wire:click="editBill({{ $bill->id }})">{{ __('Edit') }}</flux:menu.item>
+                                                    <flux:menu.item icon="trash" variant="danger" wire:click="confirmDelete({{ $bill->id }})">{{ __('Delete') }}</flux:menu.item>
+                                                </flux:menu>
+                                            </flux:dropdown>
+                                        @endcan
+                                    </td>
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="7" class="px-5 py-8 text-center text-muted">{{ __('No bills here.') }}</td>
+                                </tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+            @endif
         </flux:card>
 
         <div class="flex flex-col gap-6">
-            {{-- Who owes who (placeholder) --}}
+            {{-- Who owes who: suggested payments from the ledger --}}
             <flux:card>
                 <flux:heading size="lg" level="2">{{ __('Who owes who') }}</flux:heading>
 
-                @if (empty($demo['balances']))
-                    <flux:text class="mt-3">{{ __('Nothing to settle yet.') }}</flux:text>
+                @if (empty($summary->transfers))
+                    <flux:text class="mt-3">{{ __('Everyone\'s square. Nothing to settle.') }}</flux:text>
                 @else
-                    <ul class="mt-4 space-y-3 text-sm" role="list">
-                        @foreach ($demo['balances'] as $balance)
+                    <ul class="mt-4 space-y-3 text-sm" role="list" data-test="transfers">
+                        @foreach ($summary->transfers as $transfer)
+                            @php($toYou = $transfer['to']->is(auth()->user()))
+                            @php($fromYou = $transfer['from']->is(auth()->user()))
                             <li class="flex items-center justify-between gap-3">
                                 <span class="text-muted">
-                                    @if ($balance['amount'] > 0)
-                                        {{ Str::before($balance['user']->name, ' ') }} {{ __('owes') }} <strong class="text-ink">{{ __('you') }}</strong>
+                                    @if ($toYou)
+                                        {{ Str::before($transfer['from']->name, ' ') }} {{ __('owes') }} <strong class="text-ink">{{ __('you') }}</strong>
+                                    @elseif ($fromYou)
+                                        <strong class="text-ink">{{ __('You') }}</strong> {{ __('owe') }} {{ Str::before($transfer['to']->name, ' ') }}
                                     @else
-                                        <strong class="text-ink">{{ __('You') }}</strong> {{ __('owe') }} {{ Str::before($balance['user']->name, ' ') }}
+                                        {{ Str::before($transfer['from']->name, ' ') }} {{ __('owes') }} {{ Str::before($transfer['to']->name, ' ') }}
                                     @endif
                                 </span>
-                                <span @class(['font-bold', 'text-primary-text' => $balance['amount'] > 0, 'text-coral' => $balance['amount'] < 0])>
-                                    {{ Money::format(abs($balance['amount']), $currency) }}
+                                <span @class(['font-bold', 'text-primary-text' => $toYou, 'text-coral' => $fromYou, 'text-muted' => ! $toYou && ! $fromYou])>
+                                    {{ Money::format($transfer['amount'], $currency) }}
                                 </span>
                             </li>
                         @endforeach
                     </ul>
 
-                    <flux:button variant="primary" class="mt-4 w-full">{{ __('Settle up') }}</flux:button>
+                    {{-- Settling up arrives in roadmap step 7. --}}
+                    <flux:button variant="primary" class="mt-4 w-full" disabled>{{ __('Settle up (coming soon)') }}</flux:button>
                 @endif
             </flux:card>
 
-            {{-- Members (real data) --}}
+            {{-- Members --}}
             <flux:card>
                 <flux:heading size="lg" level="2">{{ __('Members') }}</flux:heading>
 
@@ -330,4 +478,82 @@ new class extends Component
             </div>
         </flux:modal>
     @endcan
+
+    {{-- Add / edit bill --}}
+    <flux:modal name="bill-form" class="w-full max-w-lg">
+        <form wire:submit="saveBill" class="space-y-5">
+            <div>
+                <flux:heading size="lg">{{ $form->expenseId ? __('Edit bill') : __('Add a bill') }}</flux:heading>
+                <flux:text class="mt-1">{{ __('Add bills once they\'re paid. Everyone\'s balance updates straight away.') }}</flux:text>
+            </div>
+
+            <flux:input wire:model="form.description" :label="__('What was it?')" :placeholder="__('e.g. Energy, Rent, Broadband')" maxlength="100" required />
+
+            <div class="grid gap-4 sm:grid-cols-2">
+                <flux:input wire:model.blur="form.amount" :label="__('Amount (:currency)', ['currency' => $currency])" inputmode="decimal" placeholder="0.00" required />
+                <flux:input wire:model="form.spentOn" type="date" :label="__('Paid on')" :max="now()->toDateString()" required />
+            </div>
+
+            <flux:select wire:model="form.paidBy" :label="__('Paid by')">
+                @foreach ($this->members as $member)
+                    <flux:select.option :value="$member->id">{{ $member->is(auth()->user()) ? __(':name (you)', ['name' => $member->name]) : $member->name }}</flux:select.option>
+                @endforeach
+            </flux:select>
+
+            <flux:radio.group wire:model.live="form.split" :label="__('Split')" variant="segmented">
+                <flux:radio value="equal" :label="__('Equally')" />
+                <flux:radio value="exact" :label="__('Exact amounts')" />
+            </flux:radio.group>
+
+            @if ($form->split === 'equal')
+                <flux:checkbox.group wire:model="form.participants" :label="__('Shared between')">
+                    @foreach ($this->members as $member)
+                        <flux:checkbox :value="$member->id" :label="$member->name" />
+                    @endforeach
+                </flux:checkbox.group>
+            @else
+                <fieldset class="space-y-3">
+                    <legend class="text-sm font-medium text-ink">{{ __('Each person\'s share') }}</legend>
+                    @foreach ($this->members as $member)
+                        <div class="flex items-center gap-3">
+                            <x-avatar :user="$member" size="sm" />
+                            <label for="exact-{{ $member->id }}" class="min-w-0 flex-1 truncate text-sm">{{ $member->name }}</label>
+                            <div class="w-32">
+                                <flux:input id="exact-{{ $member->id }}" wire:model="form.exactAmounts.{{ $member->id }}" inputmode="decimal" placeholder="0.00" />
+                            </div>
+                        </div>
+                        <flux:error name="form.exactAmounts.{{ $member->id }}" />
+                    @endforeach
+                    <flux:text size="sm">{{ __('Leave anyone not sharing at 0. The amounts must add up to the bill.') }}</flux:text>
+                </fieldset>
+            @endif
+
+            <flux:error name="form.split" />
+
+            <div class="flex justify-end gap-2">
+                <flux:modal.close>
+                    <flux:button variant="ghost">{{ __('Cancel') }}</flux:button>
+                </flux:modal.close>
+                <flux:button type="submit" variant="primary" data-test="save-bill-button">
+                    {{ $form->expenseId ? __('Save changes') : __('Add bill') }}
+                </flux:button>
+            </div>
+        </form>
+    </flux:modal>
+
+    {{-- Delete confirmation --}}
+    <flux:modal name="delete-bill" class="w-full max-w-md">
+        <div class="space-y-5">
+            <div>
+                <flux:heading size="lg">{{ __('Delete this bill?') }}</flux:heading>
+                <flux:text class="mt-2">{{ __('Everyone\'s balance goes back to how it was before the bill. The change is kept in the household\'s history.') }}</flux:text>
+            </div>
+            <div class="flex justify-end gap-2">
+                <flux:modal.close>
+                    <flux:button variant="ghost">{{ __('Cancel') }}</flux:button>
+                </flux:modal.close>
+                <flux:button variant="danger" wire:click="deleteBill" data-test="delete-bill-button">{{ __('Delete bill') }}</flux:button>
+            </div>
+        </div>
+    </flux:modal>
 </section>

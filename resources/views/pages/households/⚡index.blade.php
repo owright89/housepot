@@ -3,7 +3,7 @@
 use App\Actions\Households\CreateHousehold;
 use App\Enums\HouseholdRole;
 use App\Models\Household;
-use App\Support\DemoData;
+use App\Ledger\HouseholdSummary;
 use App\Support\Money;
 use Flux\Flux;
 use Illuminate\Database\Eloquent\Collection;
@@ -46,18 +46,15 @@ new #[Title('Households')] class extends Component {
     }
 
     /**
-     * Placeholder balance and monthly total for a household card, until the ledger exists (step 5).
+     * The viewer's balance and this month's total for a household card.
      *
      * @return array{balance: int, month: int}
      */
-    public function demoFigures(Household $household): array
+    public function figures(Household $household): array
     {
-        $bills = DemoData::bills($household->members);
+        $summary = HouseholdSummary::for($household, Auth::user());
 
-        return [
-            'balance' => DemoData::yourBalance(DemoData::balances($household->members, Auth::user())),
-            'month' => $household->members_count > 1 ? DemoData::monthTotal($bills) : 0,
-        ];
+        return ['balance' => $summary->yourBalance, 'month' => $summary->monthTotal];
     }
 
     /**
@@ -124,27 +121,9 @@ new #[Title('Households')] class extends Component {
             </flux:text>
         </flux:card>
     @else
-        {{-- PLACEHOLDER: pending invites arrive with invite links (4b). Buttons do nothing yet. --}}
-        @php($invite = DemoData::pendingInvite())
-        <div class="mb-6 flex flex-col gap-3 rounded-(--radius-card) border border-line bg-primary-soft p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div class="flex items-center gap-3">
-                <span class="flex size-9 shrink-0 items-center justify-center rounded-(--radius-control) bg-card text-primary-text">
-                    <flux:icon.home variant="micro" aria-hidden="true" />
-                </span>
-                <div>
-                    <p class="text-sm font-bold text-ink">{{ __(':inviter invited you to join :household', ['inviter' => $invite['inviter'], 'household' => $invite['household']]) }}</p>
-                    <p class="text-xs text-muted">{{ trans_choice(':count member|:count members', $invite['members']) }} · {{ $invite['currency'] }} · {{ __('Invited :when', ['when' => $invite['when']]) }}</p>
-                </div>
-            </div>
-            <div class="flex gap-2">
-                <flux:button>{{ __('Decline') }}</flux:button>
-                <flux:button variant="primary">{{ __('Accept') }}</flux:button>
-            </div>
-        </div>
-
         <ul class="grid gap-4 md:grid-cols-2 xl:grid-cols-3" role="list">
             @foreach ($this->households as $household)
-                @php($figures = $this->demoFigures($household))
+                @php($figures = $this->figures($household))
                 <li wire:key="household-{{ $household->id }}">
                     <a href="{{ route('households.show', $household) }}" wire:navigate class="group block h-full rounded-(--radius-card)">
                         <flux:card class="flex h-full flex-col gap-4 transition-colors group-hover:bg-subtle">
@@ -174,7 +153,6 @@ new #[Title('Households')] class extends Component {
                                 </div>
                             @endif
 
-                            {{-- PLACEHOLDER figures until the ledger exists (step 5). --}}
                             <div class="mt-auto flex items-end justify-between border-t border-line pt-3">
                                 <div>
                                     <p class="text-xs text-muted">{{ __('Your balance') }}</p>

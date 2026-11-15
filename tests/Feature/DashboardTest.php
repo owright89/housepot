@@ -1,5 +1,8 @@
 <?php
 
+use App\Actions\Expenses\ExpenseData;
+use App\Actions\Expenses\RecordExpense;
+use App\Ledger\SplitCalculator;
 use App\Models\Household;
 use App\Models\User;
 
@@ -33,5 +36,24 @@ test('dashboard shows the current household', function () {
         ->assertOk()
         ->assertSee('Ollie')
         ->assertSee('Here&#039;s where Elm Street stands this month.', false)
-        ->assertSee('Upcoming bills');
+        ->assertSee('Recent bills');
+});
+
+test('dashboard shows real balances, bills and activity', function () {
+    $alice = User::factory()->create(['name' => 'Alice Smith']);
+    $bob = User::factory()->create(['name' => 'Bob Jones']);
+    $household = Household::factory()->withOwner($alice)->withMember($bob)->create();
+
+    app(RecordExpense::class)->handle($bob, $household, new ExpenseData(
+        $bob, 'Energy', 9640, now(), SplitCalculator::equal(9640, [$alice->id, $bob->id]),
+    ));
+
+    $this->actingAs($alice)
+        ->get(route('dashboard'))
+        ->assertOk()
+        ->assertSeeHtml('data-test="you-owe">£48.20')
+        ->assertSee('To Bob')
+        ->assertSeeHtml('data-test="owed-to-you">£0.00')
+        ->assertSee('Energy')
+        ->assertSee('Bob added Energy');
 });
