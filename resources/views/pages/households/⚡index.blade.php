@@ -46,6 +46,22 @@ new #[Title('Households')] class extends Component {
     }
 
     /**
+     * Card figures update live when a bill changes in any of the user's households.
+     *
+     * @return array<string, string>
+     */
+    public function getListeners(): array
+    {
+        $listeners = ['echo-reconnected' => '$refresh'];
+
+        foreach ($this->households as $household) {
+            $listeners["echo-private:households.{$household->id},.balances.updated"] = '$refresh';
+        }
+
+        return $listeners;
+    }
+
+    /**
      * The viewer's balance and this month's total for a household card.
      *
      * @return array{balance: int, month: int}

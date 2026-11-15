@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
+use Flux\Flux;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -19,6 +20,71 @@ new #[Title('Dashboard')] class extends Component {
     public function household(): ?Household
     {
         return Auth::user()->currentHousehold();
+    }
+
+    /**
+     * Live updates for the current household. Built in code because a new user has no household.
+     *
+     * @return array<string, string>
+     */
+    public function getListeners(): array
+    {
+        $listeners = ['echo-reconnected' => 'refreshFigures'];
+
+        if ($this->household !== null) {
+            $channel = "echo-private:households.{$this->household->id}";
+
+            $listeners["{$channel},.balances.updated"] = 'refreshFigures';
+            $listeners["{$channel},.expense.recorded"] = 'billAdded';
+            $listeners["{$channel},.expense.updated"] = 'billEdited';
+            $listeners["{$channel},.expense.deleted"] = 'billDeleted';
+        }
+
+        return $listeners;
+    }
+
+    /**
+     * Re-read figures, bills and activity from the database (the socket is only a nudge).
+     */
+    public function refreshFigures(): void
+    {
+        unset($this->summary, $this->recentBills, $this->activity);
+    }
+
+    /**
+     * @param  array{actor_id: int, actor_name: string, description: string}  $event
+     */
+    public function billAdded(array $event): void
+    {
+        $this->announce($event, __(':name added :bill', ['name' => $event['actor_name'], 'bill' => $event['description']]));
+    }
+
+    /**
+     * @param  array{actor_id: int, actor_name: string, description: string}  $event
+     */
+    public function billEdited(array $event): void
+    {
+        $this->announce($event, __(':name edited :bill', ['name' => $event['actor_name'], 'bill' => $event['description']]));
+    }
+
+    /**
+     * @param  array{actor_id: int, actor_name: string, description: string}  $event
+     */
+    public function billDeleted(array $event): void
+    {
+        $this->announce($event, __(':name deleted :bill', ['name' => $event['actor_name'], 'bill' => $event['description']]));
+    }
+
+    /**
+     * @param  array{actor_id: int, actor_name: string, description: string}  $event
+     */
+    private function announce(array $event, string $message): void
+    {
+        unset($this->recentBills, $this->activity);
+
+        if ($event['actor_id'] !== Auth::id()) {
+            Flux::toast(text: $message);
+        }
     }
 
     public function greeting(): string
@@ -113,7 +179,10 @@ new #[Title('Dashboard')] class extends Component {
         <div>
             <flux:heading size="xl" level="1" class="text-2xl! font-extrabold!">{{ $this->greeting() }}</flux:heading>
             @if ($this->household)
-                <flux:text class="mt-1">{{ __('Here\'s where :household stands this month.', ['household' => $this->household->name]) }}</flux:text>
+                <flux:text class="mt-1 flex flex-wrap items-center gap-2">
+                    <span>{{ __('Here\'s where :household stands this month.', ['household' => $this->household->name]) }}</span>
+                    <x-live-indicator />
+                </flux:text>
             @endif
         </div>
 

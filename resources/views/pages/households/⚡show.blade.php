@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 new class extends Component
@@ -219,9 +220,56 @@ new class extends Component
         Flux::toast(text: __('New link created. The old one no longer works.'));
     }
 
-    private function refreshFigures(): void
+    /**
+     * Re-read bills and figures from the database. Called after saving, when another member's
+     * change is broadcast (Reverb), and when the live connection comes back after dropping.
+     */
+    #[On('echo-private:households.{household.id},.balances.updated')]
+    #[On('echo-reconnected')]
+    public function refreshFigures(): void
     {
         unset($this->bills, $this->summary);
+    }
+
+    /**
+     * @param  array{actor_id: int, actor_name: string, description: string}  $event
+     */
+    #[On('echo-private:households.{household.id},.expense.recorded')]
+    public function billAdded(array $event): void
+    {
+        $this->announce($event, __(':name added :bill', ['name' => $event['actor_name'], 'bill' => $event['description']]));
+    }
+
+    /**
+     * @param  array{actor_id: int, actor_name: string, description: string}  $event
+     */
+    #[On('echo-private:households.{household.id},.expense.updated')]
+    public function billEdited(array $event): void
+    {
+        $this->announce($event, __(':name edited :bill', ['name' => $event['actor_name'], 'bill' => $event['description']]));
+    }
+
+    /**
+     * @param  array{actor_id: int, actor_name: string, description: string}  $event
+     */
+    #[On('echo-private:households.{household.id},.expense.deleted')]
+    public function billDeleted(array $event): void
+    {
+        $this->announce($event, __(':name deleted :bill', ['name' => $event['actor_name'], 'bill' => $event['description']]));
+    }
+
+    /**
+     * Refresh the bills, and tell the user what changed unless they made the change themselves.
+     *
+     * @param  array{actor_id: int, actor_name: string, description: string}  $event
+     */
+    private function announce(array $event, string $message): void
+    {
+        unset($this->bills);
+
+        if ($event['actor_id'] !== Auth::id()) {
+            Flux::toast(text: $message);
+        }
     }
 
     public function render()
@@ -244,8 +292,9 @@ new class extends Component
     <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div class="min-w-0">
             <flux:heading size="xl" level="1" class="break-words text-2xl! font-extrabold!">{{ $household->name }}</flux:heading>
-            <p class="mt-1 text-sm text-muted">
-                {{ $household->currency }} · {{ trans_choice(':count member|:count members', $this->members->count()) }}@if ($isOwner) · {{ __('You\'re the owner') }}@endif
+            <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+                <span>{{ $household->currency }} · {{ trans_choice(':count member|:count members', $this->members->count()) }}@if ($isOwner) · {{ __('You\'re the owner') }}@endif</span>
+                <x-live-indicator />
             </p>
         </div>
 
