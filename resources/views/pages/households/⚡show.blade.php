@@ -149,7 +149,7 @@ new class extends Component
                 $message = __('Bill updated.');
             }
         } catch (InvalidExpense $e) {
-            $this->addError('form.split', $e->getMessage());
+            $this->addError('form.shares', $e->getMessage());
 
             return;
         } catch (StaleExpense $e) {
@@ -528,7 +528,7 @@ new class extends Component
                 </fieldset>
             @endif
 
-            <flux:error name="form.split" />
+            <flux:error name="form.shares" />
 
             <div class="flex justify-end gap-2">
                 <flux:modal.close>

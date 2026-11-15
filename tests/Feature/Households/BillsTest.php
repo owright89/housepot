@@ -84,9 +84,9 @@ test('bad input is shown next to the field and nothing is saved', function (arra
     'not a number' => [['form.amount' => 'thirty'], 'form.amount'],
     'zero' => [['form.amount' => '0'], 'form.amount'],
     'no name' => [['form.description' => ''], 'form.description'],
-    'nobody sharing' => [['form.participants' => []], 'form.split'],
+    'nobody sharing' => [['form.participants' => []], 'form.shares'],
     'future date' => [['form.spentOn' => '2999-01-01'], 'form.spentOn'],
-    'exact does not add up' => [['form.split' => 'exact', 'form.exactAmounts' => []], 'form.split'],
+    'exact does not add up' => [['form.split' => 'exact', 'form.exactAmounts' => []], 'form.shares'],
 ]);
 
 test('a bill can be edited and the balances follow', function () {
@@ -191,4 +191,20 @@ test('a household with no bills shows the empty state', function () {
     Livewire::test('pages::households.show', ['household' => $household])
         ->assertSee('No bills yet')
         ->assertSee('square. Nothing to settle');
+});
+
+test('a split error is shown once', function () {
+    [$household, $alice, $bob] = billsFlat();
+    actingAs($alice);
+
+    $html = Livewire::test('pages::households.show', ['household' => $household])
+        ->call('addBill')
+        ->set('form.description', 'Energy')
+        ->set('form.amount', '100')
+        ->set('form.split', 'exact')
+        ->set("form.exactAmounts.{$alice->id}", '20')
+        ->call('saveBill')
+        ->html();
+
+    expect(substr_count($html, 'The amounts add up to 20.00, but the bill is 100.00.'))->toBe(1);
 });

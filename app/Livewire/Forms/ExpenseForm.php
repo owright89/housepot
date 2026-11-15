@@ -127,7 +127,8 @@ class ExpenseForm extends Form
                 ? SplitCalculator::equal($total, array_values(array_map('intval', $this->participants)))
                 : SplitCalculator::exact($total, $this->parsedExactAmounts($members->keys()->all()));
         } catch (InvalidSplit $e) {
-            $this->fail('split', $e->getMessage());
+            // Not 'split': that key is bound to the Split buttons, so Flux would show it there as well.
+            $this->fail('shares', $e->getMessage());
         }
 
         return new ExpenseData(
