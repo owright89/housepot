@@ -31,3 +31,41 @@ test('member cannot create a settlement in an archived household', function () {
 
     expect($member->can('create', [Settlement::class, $household]))->toBeFalse();
 });
+
+describe('responding', function () {
+    test('only the recipient can confirm or reject a payment', function () {
+        [$household, $alice, $bob, $cara] = flat();
+        $settlement = Settlement::factory()->for($household)->create([
+            'from_user_id' => $bob->id,
+            'to_user_id' => $alice->id,
+        ]);
+
+        expect($alice->can('respond', $settlement))->toBeTrue()
+            ->and($bob->can('respond', $settlement))->toBeFalse()
+            ->and($cara->can('respond', $settlement))->toBeFalse();
+    });
+
+    test('a recipient who has left cannot respond', function () {
+        $alice = User::factory()->create();
+        $bob = User::factory()->create();
+        $household = Household::factory()->withOwner()->withMember($alice, leftAt: now())->withMember($bob)->create();
+        $settlement = Settlement::factory()->for($household)->create([
+            'from_user_id' => $bob->id,
+            'to_user_id' => $alice->id,
+        ]);
+
+        expect($alice->can('respond', $settlement))->toBeFalse();
+    });
+
+    test('nobody can respond in an archived household', function () {
+        $alice = User::factory()->create();
+        $bob = User::factory()->create();
+        $household = Household::factory()->archived()->withOwner($alice)->withMember($bob)->create();
+        $settlement = Settlement::factory()->for($household)->create([
+            'from_user_id' => $bob->id,
+            'to_user_id' => $alice->id,
+        ]);
+
+        expect($alice->can('respond', $settlement))->toBeFalse();
+    });
+});
