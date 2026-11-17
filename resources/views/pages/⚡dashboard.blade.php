@@ -323,14 +323,15 @@ new #[Title('Dashboard')] class extends Component {
                     <ul class="divide-y divide-line border-t border-line" role="list">
                         @foreach ($this->recentBills as $bill)
                             <li wire:key="recent-bill-{{ $bill->id }}" class="flex items-center gap-3 px-5 py-3">
+                                {{-- Category icon; the label is in the caption below, so meaning never relies on the icon --}}
                                 <span class="flex size-9 shrink-0 items-center justify-center rounded-(--radius-control) bg-subtle text-muted">
-                                    <flux:icon.document-text variant="micro" aria-hidden="true" />
+                                    <flux:icon :icon="$bill->displayCategory()->icon()" variant="micro" aria-hidden="true" />
                                 </span>
 
                                 <div class="min-w-0 flex-1">
                                     <p class="truncate text-sm font-bold text-ink">{{ $bill->description }}</p>
                                     <p class="truncate text-xs text-muted">
-                                        {{ $bill->spent_on->format('j M') }} · {{ $bill->payer->is(auth()->user()) ? __('Paid by you') : __('Paid by :name', ['name' => Str::before($bill->payer->name, ' ')]) }}
+                                        {{ $bill->displayCategory()->label() }} · {{ $bill->spent_on->format('j M') }} · {{ $bill->payer->is(auth()->user()) ? __('Paid by you') : __('Paid by :name', ['name' => Str::before($bill->payer->name, ' ')]) }}
                                     </p>
                                 </div>
 

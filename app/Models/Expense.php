@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ExpenseCategory;
 use Database\Factories\ExpenseFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -18,7 +19,7 @@ use Illuminate\Support\Carbon;
  * @property int $paid_by
  * @property string $description
  * @property int $amount Pence.
- * @property string|null $category
+ * @property ExpenseCategory|null $category Null on bills recorded before categories existed.
  * @property Carbon $spent_on
  * @property int $version
  * @property Carbon|null $created_at
@@ -42,7 +43,16 @@ class Expense extends Model
             'amount' => 'integer',
             'spent_on' => 'date',
             'version' => 'integer',
+            'category' => ExpenseCategory::class,
         ];
+    }
+
+    /**
+     * The category to show: bills recorded before categories existed count as Other.
+     */
+    public function displayCategory(): ExpenseCategory
+    {
+        return $this->category ?? ExpenseCategory::Other;
     }
 
     /**

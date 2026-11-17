@@ -2,6 +2,7 @@
 
 namespace App\Actions\Expenses;
 
+use App\Enums\ExpenseCategory;
 use App\Ledger\InvalidExpense;
 use App\Models\Expense;
 use App\Models\Household;
@@ -24,7 +25,7 @@ final readonly class ExpenseData
         public int $amount,
         public CarbonInterface $spentOn,
         public array $shares,
-        public ?string $category = null,
+        public ?ExpenseCategory $category = null,
     ) {}
 
     /**
@@ -106,7 +107,7 @@ final readonly class ExpenseData
             'amount' => $this->amount,
             'paid_by' => $this->payer->id,
             'spent_on' => Carbon::parse($this->spentOn)->toDateString(),
-            'category' => $this->category,
+            'category' => $this->category?->value,
             'shares' => $shares,
         ];
     }

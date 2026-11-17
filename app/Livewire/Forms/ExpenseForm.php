@@ -3,6 +3,7 @@
 namespace App\Livewire\Forms;
 
 use App\Actions\Expenses\ExpenseData;
+use App\Enums\ExpenseCategory;
 use App\Ledger\InvalidSplit;
 use App\Ledger\SplitCalculator;
 use App\Models\Expense;
@@ -10,6 +11,7 @@ use App\Models\Household;
 use App\Models\User;
 use App\Support\Money;
 use Illuminate\Support\Carbon;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Livewire\Form;
 
@@ -31,6 +33,9 @@ class ExpenseForm extends Form
 
     public string $spentOn = '';
 
+    /** An ExpenseCategory value. */
+    public string $category = 'other';
+
     public ?int $paidBy = null;
 
     /** equal | exact */
@@ -51,6 +56,7 @@ class ExpenseForm extends Form
             'description' => ['required', 'string', 'max:100'],
             'amount' => ['required', 'string', 'max:20'],
             'spentOn' => ['required', 'date', 'before_or_equal:today'],
+            'category' => ['required', Rule::enum(ExpenseCategory::class)],
             'paidBy' => ['required', 'integer'],
             'split' => ['required', 'in:equal,exact'],
             'participants' => ['array'],
@@ -97,6 +103,7 @@ class ExpenseForm extends Form
         $this->description = $expense->description;
         $this->amount = Money::toInput($expense->amount);
         $this->spentOn = $expense->spent_on->toDateString();
+        $this->category = $expense->displayCategory()->value;
         $this->paidBy = $expense->paid_by;
         $this->split = $isEqual ? 'equal' : 'exact';
         $this->participants = $sharing->keys()->all();
@@ -137,6 +144,7 @@ class ExpenseForm extends Form
             amount: $total,
             spentOn: Carbon::parse($this->spentOn),
             shares: $shares,
+            category: ExpenseCategory::from($this->category),
         );
     }
 

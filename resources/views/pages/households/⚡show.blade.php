@@ -7,6 +7,7 @@ use App\Actions\Households\CreateInvite;
 use App\Actions\Settlements\ConfirmSettlement;
 use App\Actions\Settlements\RejectSettlement;
 use App\Actions\Settlements\RequestSettlement;
+use App\Enums\ExpenseCategory;
 use App\Enums\HouseholdRole;
 use App\Enums\SettlementStatus;
 use App\Ledger\HouseholdSummary;
@@ -550,7 +551,14 @@ new class extends Component
                         <tbody class="divide-y divide-line border-t border-line">
                             @forelse ($this->filteredBills() as $bill)
                                 <tr wire:key="bill-{{ $bill->id }}">
-                                    <td class="px-5 py-3 font-bold text-ink">{{ $bill->description }}</td>
+                                    @php($category = $bill->displayCategory())
+                                    <td class="px-5 py-3">
+                                        <p class="font-bold text-ink">{{ $bill->description }}</p>
+                                        <p class="mt-0.5 flex items-center gap-1 text-xs text-muted" data-test="bill-category">
+                                            <flux:icon :icon="$category->icon()" variant="micro" class="size-3.5" aria-hidden="true" />
+                                            {{ $category->label() }}
+                                        </p>
+                                    </td>
                                     <td class="px-3 py-3">
                                         <span class="flex items-center gap-2 text-muted">
                                             <x-avatar :user="$bill->payer" size="sm" />
@@ -738,6 +746,12 @@ new class extends Component
                 <flux:input wire:model.blur="form.amount" :label="__('Amount (:currency)', ['currency' => $currency])" inputmode="decimal" placeholder="0.00" required />
                 <flux:input wire:model="form.spentOn" type="date" :label="__('Paid on')" :max="now()->toDateString()" required />
             </div>
+
+            <flux:select wire:model="form.category" :label="__('Category')" data-test="bill-category-select">
+                @foreach (ExpenseCategory::cases() as $option)
+                    <flux:select.option :value="$option->value">{{ $option->label() }}</flux:select.option>
+                @endforeach
+            </flux:select>
 
             <flux:select wire:model="form.paidBy" :label="__('Paid by')">
                 @foreach ($this->members as $member)
