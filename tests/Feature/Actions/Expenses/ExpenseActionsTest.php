@@ -16,21 +16,6 @@ use App\Models\JournalEntry;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Alice (owner), Bob and Cara share a flat. Ids ascend in that order.
- *
- * @return array{0: Household, 1: User, 2: User, 3: User}
- */
-function flat(): array
-{
-    $alice = User::factory()->create(['name' => 'Alice']);
-    $bob = User::factory()->create(['name' => 'Bob']);
-    $cara = User::factory()->create(['name' => 'Cara']);
-    $household = Household::factory()->withOwner($alice)->withMember($bob)->withMember($cara)->create();
-
-    return [$household, $alice, $bob, $cara];
-}
-
 function bill(User $payer, int $amount, array $userIds, string $description = 'Rent'): ExpenseData
 {
     return new ExpenseData($payer, $description, $amount, now(), SplitCalculator::equal($amount, $userIds));

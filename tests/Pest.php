@@ -1,5 +1,7 @@
 <?php
 
+use App\Models\Household;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -42,3 +44,18 @@ pest()->extend(TestCase::class)->in('Unit');
 | global functions to help you to reduce the number of lines of code in your test files.
 |
 */
+
+/**
+ * Alice (owner), Bob and Cara share a flat. Ids ascend in that order.
+ *
+ * @return array{0: Household, 1: User, 2: User, 3: User}
+ */
+function flat(): array
+{
+    $alice = User::factory()->create(['name' => 'Alice']);
+    $bob = User::factory()->create(['name' => 'Bob']);
+    $cara = User::factory()->create(['name' => 'Cara']);
+    $household = Household::factory()->withOwner($alice)->withMember($bob)->withMember($cara)->create();
+
+    return [$household, $alice, $bob, $cara];
+}
