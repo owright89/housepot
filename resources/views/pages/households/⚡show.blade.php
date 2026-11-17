@@ -451,6 +451,7 @@ new class extends Component
             <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
                 <span>{{ $household->currency }} · {{ trans_choice(':count member|:count members', $this->members->count()) }}@if ($isOwner) · {{ __('You\'re the owner') }}@endif</span>
                 <x-live-indicator />
+                <x-household-presence :household="$household" :members="$this->members" />
             </p>
         </div>
 
