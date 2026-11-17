@@ -11,11 +11,9 @@ Route::middleware(['auth'])->group(function () {
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('settings/appearance', 'pages::settings.appearance')->name('appearance.edit');
 
-    Route::livewire('settings/security', 'pages::settings.security')
-        ->middleware([
-            'password.confirm',
-        ])
-        ->name('security.edit');
+    // Password confirmation happens inline on the page (see pages::settings.security), not via
+    // the password.confirm middleware's redirect to /user/confirm-password.
+    Route::livewire('settings/security', 'pages::settings.security')->name('security.edit');
 });
 
 Route::get('.well-known/passkey-endpoints', function () {

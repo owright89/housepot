@@ -3,6 +3,7 @@
 use App\Concerns\PasswordValidationRules;
 use Flux\Flux;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 use Laravel\Fortify\Actions\DisableTwoFactorAuthentication;
 use Laravel\Fortify\Features;
@@ -15,6 +16,16 @@ use Livewire\Attributes\On;
 
 new #[Title('Security settings')] class extends Component {
     use PasswordValidationRules;
+
+    /**
+     * Whether the user has confirmed their password recently (config auth.password_timeout).
+     * Until then the page shows an inline "Confirm it's you" box instead of the settings, replacing
+     * the redirect to /user/confirm-password that the password.confirm middleware used to do.
+     */
+    #[Locked]
+    public bool $unlocked = false;
+
+    public string $confirmablePassword = '';
 
     public string $current_password = '';
     public string $password = '';
@@ -45,6 +56,13 @@ new #[Title('Security settings')] class extends Component {
      */
     public function mount(DisableTwoFactorAuthentication $disableTwoFactorAuthentication): void
     {
+        $this->unlocked = $this->passwordRecentlyConfirmed();
+
+        if (! $this->unlocked) {
+            // A passkey confirmation redirects to the "intended" URL, so bring it back here.
+            session()->put('url.intended', route('security.edit'));
+        }
+
         $this->canManageTwoFactor = Features::canManageTwoFactorAuthentication();
 
         if ($this->canManageTwoFactor) {
@@ -64,10 +82,75 @@ new #[Title('Security settings')] class extends Component {
     }
 
     /**
+     * Confirm the user's password inline, then show the security settings. Records the same
+     * session timestamp as Laravel's password.confirm, so Fortify's own confirm-protected
+     * endpoints (passkeys, two-factor) accept it too.
+     */
+    public function confirmPassword(): void
+    {
+        $this->validate(['confirmablePassword' => ['required', 'string']]);
+
+        $key = 'confirm-password:'.Auth::id();
+
+        if (RateLimiter::tooManyAttempts($key, 5)) {
+            $this->reset('confirmablePassword');
+
+            throw ValidationException::withMessages([
+                'confirmablePassword' => __('auth.throttle', ['seconds' => RateLimiter::availableIn($key)]),
+            ]);
+        }
+
+        $valid = Auth::guard('web')->validate([
+            'email' => Auth::user()->email,
+            'password' => $this->confirmablePassword,
+        ]);
+
+        $this->reset('confirmablePassword');
+
+        if (! $valid) {
+            RateLimiter::hit($key);
+
+            throw ValidationException::withMessages(['confirmablePassword' => __('auth.password')]);
+        }
+
+        RateLimiter::clear($key);
+        session()->put('auth.password_confirmed_at', time());
+        session()->forget('url.intended');
+
+        $this->unlocked = true;
+
+        if ($this->canManagePasskeys) {
+            $this->loadPasskeys();
+        }
+    }
+
+    private function passwordRecentlyConfirmed(): bool
+    {
+        $confirmedAt = (int) session('auth.password_confirmed_at', 0);
+
+        return time() - $confirmedAt < (int) config('auth.password_timeout', 10800);
+    }
+
+    /**
+     * Guard for every action on this page: if the confirmation has expired since the page loaded,
+     * lock it again instead of acting. (Livewire doesn't re-run route middleware on updates.)
+     */
+    private function ensureUnlocked(): bool
+    {
+        $this->unlocked = $this->passwordRecentlyConfirmed();
+
+        return $this->unlocked;
+    }
+
+    /**
      * Update the password for the currently authenticated user.
      */
     public function updatePassword(): void
     {
+        if (! $this->ensureUnlocked()) {
+            return;
+        }
+
         try {
             $validated = $this->validate([
                 'current_password' => $this->currentPasswordRules(),
@@ -112,6 +195,10 @@ new #[Title('Security settings')] class extends Component {
      */
     public function confirmDelete(int $passkeyId): void
     {
+        if (! $this->ensureUnlocked()) {
+            return;
+        }
+
         $passkey = auth()->user()->passkeys()->findOrFail($passkeyId);
 
         $this->deletingPasskeyId = $passkey->id;
@@ -124,7 +211,7 @@ new #[Title('Security settings')] class extends Component {
      */
     public function deletePasskey(DeletePasskey $deletePasskey): void
     {
-        if (! $this->deletingPasskeyId) {
+        if (! $this->ensureUnlocked() || ! $this->deletingPasskeyId) {
             return;
         }
 
@@ -160,6 +247,10 @@ new #[Title('Security settings')] class extends Component {
      */
     public function disable(DisableTwoFactorAuthentication $disableTwoFactorAuthentication): void
     {
+        if (! $this->ensureUnlocked()) {
+            return;
+        }
+
         $disableTwoFactorAuthentication(auth()->user());
 
         $this->twoFactorEnabled = false;
@@ -171,6 +262,35 @@ new #[Title('Security settings')] class extends Component {
 
     <flux:heading level="2" class="sr-only">{{ __('Security settings') }}</flux:heading>
 
+    @unless ($unlocked)
+        {{-- Inline password confirmation, inside Settings rather than on a separate page --}}
+        <x-pages::settings.layout :heading="__('Confirm it\'s you')" :subheading="__('Security settings need your password. You won\'t be asked again for a few hours.')">
+            <div class="mt-6 space-y-6" data-test="security-locked">
+                <x-passkey-verify
+                    options-route="passkey.confirm-options"
+                    submit-route="passkey.confirm"
+                    :label="__('Confirm with passkey')"
+                    :loading-label="__('Confirming...')"
+                    :separator="__('Or confirm with password')"
+                />
+
+                <form wire:submit="confirmPassword" class="space-y-6">
+                    <flux:input
+                        wire:model="confirmablePassword"
+                        :label="__('Password')"
+                        type="password"
+                        required
+                        autocomplete="current-password"
+                        viewable
+                    />
+
+                    <flux:button variant="primary" type="submit" data-test="confirm-password-button">
+                        {{ __('Confirm') }}
+                    </flux:button>
+                </form>
+            </div>
+        </x-pages::settings.layout>
+    @else
     <x-pages::settings.layout :heading="__('Update password')" :subheading="__('Ensure your account is using a long, random password to stay secure')">
         <form method="POST" wire:submit="updatePassword" class="mt-6 space-y-6">
             <flux:input
@@ -307,6 +427,7 @@ new #[Title('Security settings')] class extends Component {
             </section>
         @endif
     </x-pages::settings.layout>
+    @endunless
 
     <flux:modal
         name="delete-passkey-modal"
