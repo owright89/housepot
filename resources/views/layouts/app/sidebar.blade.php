@@ -4,10 +4,11 @@
         @include('partials.head')
     </head>
     <body class="min-h-screen bg-canvas text-ink">
-        <flux:sidebar sticky collapsible="mobile" class="border-e border-line bg-sidebar">
+        {{-- Collapsible on desktop too: Flux remembers the choice in localStorage between pages. --}}
+        <flux:sidebar sticky collapsible class="border-e border-line bg-sidebar">
             <flux:sidebar.header>
                 <x-app-logo href="{{ route('dashboard') }}" wire:navigate />
-                <flux:sidebar.collapse class="lg:hidden" />
+                <flux:sidebar.collapse :tooltip="__('Collapse or expand the sidebar')" />
             </flux:sidebar.header>
 
             @php($currentHousehold = auth()->user()->currentHousehold())
