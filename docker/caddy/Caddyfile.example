@@ -1,0 +1,10 @@
+# Add this block to the server's Caddyfile (see DEPLOYMENT.md, step 4).
+housepot.owright.dev {
+	encode zstd gzip
+
+	# Reverb: browsers connect to wss://housepot.owright.dev/app/{key}; /apps/... is its HTTP API.
+	@reverb path /app/* /apps/*
+	reverse_proxy @reverb housepot-reverb:8080
+
+	reverse_proxy housepot-web:8080
+}

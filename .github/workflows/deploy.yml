@@ -1,0 +1,138 @@
+# After the tests pass on main: build the production images, then (after manual approval)
+# deploy them. See DEPLOYMENT.md for the GitHub settings this needs.
+name: deploy
+
+on:
+  workflow_run:
+    workflows: [tests]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and push images
+    # Only when the tests workflow succeeded (or when started by hand).
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - name: Commit to build
+        id: sha
+        run: echo "sha=${{ github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.sha.outputs.sha }}
+          persist-credentials: false
+
+      - name: Image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/housepot" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: app
+          push: true
+          build-args: |
+            VITE_REVERB_APP_KEY=${{ vars.REVERB_APP_KEY }}
+            VITE_REVERB_HOST=${{ vars.REVERB_PUBLIC_HOST || 'housepot.owright.dev' }}
+          tags: |
+            ${{ steps.image.outputs.name }}-app:${{ steps.sha.outputs.sha }}
+            ${{ steps.image.outputs.name }}-app:latest
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,scope=app,mode=max
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: web
+          push: true
+          build-args: |
+            VITE_REVERB_APP_KEY=${{ vars.REVERB_APP_KEY }}
+            VITE_REVERB_HOST=${{ vars.REVERB_PUBLIC_HOST || 'housepot.owright.dev' }}
+          tags: |
+            ${{ steps.image.outputs.name }}-web:${{ steps.sha.outputs.sha }}
+            ${{ steps.image.outputs.name }}-web:latest
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+  deploy:
+    name: Deploy to production
+    needs: build
+    runs-on: ubuntu-24.04
+    # The "production" environment requires a reviewer to approve each deploy.
+    environment:
+      name: production
+      url: https://housepot.owright.dev
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/srv/housepot' }}
+      SHA: ${{ needs.build.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_deploy ~/.ssh/known_hosts
+
+      - name: Upload the compose file
+        run: scp -i ~/.ssh/id_deploy -P "$DEPLOY_PORT" compose.prod.yaml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/compose.yaml"
+
+      - name: Migrate, then start the new images
+        env:
+          IMAGE_SOURCE: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            bash -s -- "$DEPLOY_PATH" "$SHA" "$IMAGE_SOURCE" <<'EOF'
+          set -euo pipefail
+          deploy_path="$1" sha="$2" image_source="$3"
+          cd "$deploy_path"
+          # Point the stack at this commit's images (IMAGE_TAG lives in the server's .env).
+          if grep -q '^IMAGE_TAG=' .env; then
+              sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=$sha/" .env
+          else
+              echo "IMAGE_TAG=$sha" >> .env
+          fi
+          docker compose pull
+          # Migrations run against the new code before it starts serving. A failure stops the deploy
+          # here, with the old containers still running.
+          docker compose run --rm --no-deps app php artisan migrate --force
+          docker compose up -d --wait
+          # Remove Housepot images that are no longer used and over 30 days old (older SHAs stay in GHCR).
+          docker image prune -af --filter "label=org.opencontainers.image.source=$image_source" --filter 'until=720h'
+          EOF

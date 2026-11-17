@@ -1,0 +1,134 @@
+# Production stack for housepot.owright.dev. See DEPLOYMENT.md.
+#
+# On the server this file is saved as compose.yaml next to a .env file holding the secrets and
+# IMAGE_TAG (the commit SHA to run). No service publishes a port: Caddy, running as its own
+# compose project, reaches "web" and "reverb" over the shared Caddy network.
+name: housepot
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# Everything that runs the Laravel app shares one image, environment and set of networks.
+x-laravel: &laravel
+  image: ${HOUSEPOT_IMAGE:-ghcr.io/owright89/housepot}-app:${IMAGE_TAG:?Set IMAGE_TAG in .env to the commit SHA to deploy}
+  restart: unless-stopped
+  env_file: .env
+  # Production defaults; a value set in .env takes precedence.
+  environment:
+    APP_ENV: ${APP_ENV:-production}
+    APP_DEBUG: ${APP_DEBUG:-false}
+    LOG_CHANNEL: ${LOG_CHANNEL:-stderr}
+    DB_CONNECTION: pgsql
+    SESSION_DRIVER: ${SESSION_DRIVER:-database}
+    SESSION_SECURE_COOKIE: ${SESSION_SECURE_COOKIE:-true}
+    CACHE_STORE: ${CACHE_STORE:-redis}
+    QUEUE_CONNECTION: ${QUEUE_CONNECTION:-redis}
+    BROADCAST_CONNECTION: ${BROADCAST_CONNECTION:-reverb}
+    REDIS_CLIENT: phpredis
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+    # Server side: the app and Horizon send broadcasts to the reverb container directly.
+    REVERB_HOST: reverb
+    REVERB_PORT: 8080
+    REVERB_SCHEME: http
+    REVERB_SERVER_HOST: 0.0.0.0
+    REVERB_SERVER_PORT: 8080
+  networks:
+    - internal
+    - egress
+    - database
+  depends_on:
+    redis:
+      condition: service_healthy
+  logging: *logging
+
+services:
+  app:
+    <<: *laravel
+
+  web:
+    image: ${HOUSEPOT_IMAGE:-ghcr.io/owright89/housepot}-web:${IMAGE_TAG:?Set IMAGE_TAG in .env to the commit SHA to deploy}
+    restart: unless-stopped
+    networks:
+      internal:
+      caddy:
+        # A name Caddy can use that won't clash with other projects' "web" services.
+        aliases:
+          - housepot-web
+    depends_on:
+      app:
+        condition: service_healthy
+    logging: *logging
+
+  # Queue workers. Broadcasts and mail are queued, so without this nothing is real-time.
+  horizon:
+    <<: *laravel
+    command: ["php", "artisan", "horizon"]
+    stop_signal: SIGTERM
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "php", "artisan", "horizon:status"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  # Scheduled tasks: the nightly invite prune and Horizon's metrics snapshots.
+  scheduler:
+    <<: *laravel
+    command: ["php", "artisan", "schedule:work"]
+    healthcheck:
+      disable: true
+
+  # WebSockets. Browsers reach it through Caddy at wss://housepot.owright.dev/app/...
+  reverb:
+    <<: *laravel
+    command: ["php", "artisan", "reverb:start"]
+    networks:
+      internal:
+      caddy:
+        aliases:
+          - housepot-reverb
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@fsockopen('127.0.0.1', 8080) ? 0 : 1);"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # Queue, cache and Horizon's data. Private: only reachable on the internal network.
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *logging
+
+networks:
+  # Between the containers only. No route to the internet.
+  internal:
+    internal: true
+  # Outbound access for the containers that send email (Resend).
+  egress:
+  # Your existing Postgres container's network. Set DB_NETWORK in .env (DEPLOYMENT.md, step 5).
+  database:
+    external: true
+    name: ${DB_NETWORK:?Set DB_NETWORK in .env to the Postgres container's Docker network}
+  # Shared with the Caddy reverse proxy project (the same network GenDoc uses).
+  caddy:
+    external: true
+    name: ${CADDY_NETWORK:-web}
+
+volumes:
+  redisdata:
