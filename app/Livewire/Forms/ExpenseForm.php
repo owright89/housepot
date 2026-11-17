@@ -41,6 +41,12 @@ class ExpenseForm extends Form
     /** equal | exact */
     public string $split = 'equal';
 
+    /**
+     * True when the bill being edited was split under the old lowest-id penny rule. Saving keeps
+     * that rule, so an unchanged edit never moves a penny (and never posts a pointless reversal).
+     */
+    public bool $lowestIdPennies = false;
+
     /** @var array<int, int|string> user ids sharing an equal split */
     public array $participants = [];
 
@@ -95,8 +101,14 @@ class ExpenseForm extends Form
 
         $shares = $expense->splits()->pluck('amount', 'user_id')->map(fn ($pence) => (int) $pence);
         $sharing = $shares->filter(fn (int $pence) => $pence > 0);
-        $isEqual = $sharing->isNotEmpty()
-            && SplitCalculator::equal($expense->amount, array_values(array_map('intval', $sharing->keys()->all()))) === $sharing->sortKeys()->all();
+        $sharingIds = array_values(array_map('intval', $sharing->keys()->all()));
+
+        // Equal under the payer-first penny rule, or the older lowest-id rule (bills recorded before it).
+        $isPayerFirst = $sharing->isNotEmpty()
+            && SplitCalculator::equal($expense->amount, $sharingIds, $expense->paid_by) === $sharing->sortKeys()->all();
+        $isLowestId = $sharing->isNotEmpty()
+            && SplitCalculator::equal($expense->amount, $sharingIds) === $sharing->sortKeys()->all();
+        $isEqual = $isPayerFirst || $isLowestId;
 
         $this->expenseId = $expense->id;
         $this->version = $expense->version;
@@ -106,6 +118,7 @@ class ExpenseForm extends Form
         $this->category = $expense->displayCategory()->value;
         $this->paidBy = $expense->paid_by;
         $this->split = $isEqual ? 'equal' : 'exact';
+        $this->lowestIdPennies = $isLowestId && ! $isPayerFirst;
         $this->participants = $sharing->keys()->all();
         $this->exactAmounts = $shares->map(fn (int $pence) => Money::toInput($pence))->all();
     }
@@ -131,7 +144,7 @@ class ExpenseForm extends Form
 
         try {
             $shares = $this->split === 'equal'
-                ? SplitCalculator::equal($total, array_values(array_map('intval', $this->participants)))
+                ? SplitCalculator::equal($total, array_values(array_map('intval', $this->participants)), $this->lowestIdPennies ? null : $payer->id)
                 : SplitCalculator::exact($total, $this->parsedExactAmounts($members->keys()->all()));
         } catch (InvalidSplit $e) {
             // Not 'split': that key is bound to the Split buttons, so Flux would show it there as well.

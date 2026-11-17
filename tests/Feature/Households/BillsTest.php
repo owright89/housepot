@@ -7,6 +7,7 @@ use App\Ledger\Ledger;
 use App\Ledger\SplitCalculator;
 use App\Models\Expense;
 use App\Models\Household;
+use App\Models\JournalEntry;
 use App\Models\User;
 use Livewire\Livewire;
 
@@ -49,7 +50,8 @@ test('any member can add a bill split equally', function () {
 
     expect($expense->amount)->toBe(9640)
         ->and($expense->paid_by)->toBe($bob->id)
-        ->and(Ledger::balances($household))->toBe([$alice->id => -3214, $bob->id => 9640 - 3213, $cara->id => -3213]);
+        // 9640 / 3 leaves 1p over: Bob paid, so his share takes it (3214), not Alice's.
+        ->and(Ledger::balances($household))->toBe([$alice->id => -3213, $bob->id => 9640 - 3214, $cara->id => -3213]);
 });
 
 test('a bill can be split by exact amounts', function () {
@@ -207,4 +209,45 @@ test('a split error is shown once', function () {
         ->html();
 
     expect(substr_count($html, 'The amounts add up to 20.00, but the bill is 100.00.'))->toBe(1);
+});
+
+test('a bill split under the old lowest-id penny rule still opens as an equal split', function () {
+    [$household, $alice, $bob, $cara] = billsFlat();
+    // Cara paid £50; the old rule gave the 2 spare pennies to Alice and Bob (lowest ids),
+    // where the new rule would give them to Cara and Alice.
+    $expense = recordBill($household, $cara, 5000, [$alice->id, $bob->id, $cara->id]);
+    actingAs($alice);
+
+    Livewire::test('pages::households.show', ['household' => $household])
+        ->call('editBill', $expense->id)
+        ->assertSet('form.split', 'equal')
+        ->assertSet('form.lowestIdPennies', true)
+        ->call('saveBill')
+        ->assertHasNoErrors();
+
+    // Nothing changed, so no penny moved and no reversal was posted.
+    expect(JournalEntry::count())->toBe(1)
+        ->and($expense->fresh()->splits()->pluck('amount', 'user_id')->all())
+        ->toEqual([$alice->id => 1667, $bob->id => 1667, $cara->id => 1666]);
+});
+
+test('a new equal split gives the spare penny to the payer', function () {
+    [$household, $alice, $bob, $cara] = billsFlat();
+    actingAs($cara);
+
+    Livewire::test('pages::households.show', ['household' => $household])
+        ->call('addBill')
+        ->set('form.description', 'Takeaway')
+        ->set('form.amount', '50')
+        ->call('saveBill')
+        ->assertHasNoErrors();
+
+    // £50 three ways: Cara paid, so she and the lowest other id (Alice) take the 2 spare pennies.
+    expect(Expense::sole()->splits()->pluck('amount', 'user_id')->all())
+        ->toEqual([$alice->id => 1667, $bob->id => 1666, $cara->id => 1667]);
+
+    Livewire::test('pages::households.show', ['household' => $household])
+        ->call('editBill', Expense::sole()->id)
+        ->assertSet('form.split', 'equal')
+        ->assertSet('form.lowestIdPennies', false);
 });

@@ -11,13 +11,18 @@ namespace App\Ledger;
 class SplitCalculator
 {
     /**
-     * Equal split. Leftover pennies go one each to the lowest user ids, so the
-     * result is the same every time (CLAUDE.md: deterministic, by sorted user id).
+     * Equal split. When the total doesn't divide evenly, the leftover pennies go one each to
+     * the payer first (if they share the bill), then to the lowest user ids. The payer is the
+     * one holding the odd penny, so nobody else is charged extra on someone else's bill, and the
+     * same people aren't always the ones rounded up. Deterministic (CLAUDE.md, Ledger rules).
+     *
+     * Without a payer (or when the payer isn't sharing), the pennies go by lowest user id only:
+     * the rule used for bills recorded before the payer-first rule.
      *
      * @param  list<int>  $userIds
      * @return array<int, int>
      */
-    public static function equal(int $total, array $userIds): array
+    public static function equal(int $total, array $userIds, ?int $payerId = null): array
     {
         self::assertPositiveTotal($total);
 
@@ -31,11 +36,19 @@ class SplitCalculator
         $base = intdiv($total, count($userIds));
         $leftover = $total % count($userIds);
 
+        $order = $userIds;
+
+        if ($payerId !== null && in_array($payerId, $userIds, true)) {
+            $order = [$payerId, ...array_values(array_diff($userIds, [$payerId]))];
+        }
+
         $shares = [];
 
-        foreach ($userIds as $i => $userId) {
+        foreach ($order as $i => $userId) {
             $shares[$userId] = $base + ($i < $leftover ? 1 : 0);
         }
+
+        ksort($shares);
 
         return $shares;
     }

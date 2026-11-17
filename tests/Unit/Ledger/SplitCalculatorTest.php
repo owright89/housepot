@@ -8,7 +8,17 @@ describe('equal', function () {
         expect(SplitCalculator::equal(3000, [1, 2, 3]))->toBe([1 => 1000, 2 => 1000, 3 => 1000]);
     });
 
-    test('gives leftover pennies to the lowest user ids', function () {
+    test('gives a leftover penny to the payer first, then the lowest user ids', function () {
+        // £50 three ways: the payer (3) takes one spare penny, the lowest other id (1) the other.
+        expect(SplitCalculator::equal(5000, [1, 2, 3], payerId: 3))->toBe([1 => 1667, 2 => 1666, 3 => 1667])
+            ->and(SplitCalculator::equal(1000, [1, 2, 3], payerId: 2))->toBe([1 => 333, 2 => 334, 3 => 333]);
+    });
+
+    test('a payer who is not sharing the bill gets no pennies', function () {
+        expect(SplitCalculator::equal(1000, [1, 2, 3], payerId: 9))->toBe([1 => 334, 2 => 333, 3 => 333]);
+    });
+
+    test('without a payer, leftover pennies go to the lowest user ids (the older rule)', function () {
         expect(SplitCalculator::equal(1000, [3, 1, 2]))->toBe([1 => 334, 2 => 333, 3 => 333])
             ->and(SplitCalculator::equal(1001, [7, 4, 9]))->toBe([4 => 334, 7 => 334, 9 => 333]);
     });
