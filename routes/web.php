@@ -9,7 +9,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('dashboard', 'pages::dashboard')->name('dashboard');
 
     Route::livewire('households', 'pages::households.index')->name('households.index');
-    Route::livewire('households/{household}', 'pages::households.show')
+    // One household page in three sections, each with its own URL and nav item:
+    // households/{id} (bills), households/{id}/payments, households/{id}/members.
+    Route::livewire('households/{household}/{section?}', 'pages::households.show')
+        ->whereIn('section', ['payments', 'members'])
         ->name('households.show')
         ->can('view', 'household');
 

@@ -32,6 +32,9 @@
 
         <flux:menu.separator />
 
+        <flux:menu.item :href="route('households.index')" icon="squares-2x2" wire:navigate>
+            {{ __('All households') }}
+        </flux:menu.item>
         <flux:menu.item :href="route('households.index')" icon="plus" wire:navigate>
             {{ __('New household') }}
         </flux:menu.item>

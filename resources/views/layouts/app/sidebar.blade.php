@@ -17,19 +17,33 @@
                 <x-household-switcher :current="$currentHousehold" />
             @endif
 
+            {{--
+                Navigation is about the current household (chosen in the switcher above). People are in one
+                or two households, so the switcher replaces a Households page. :current is explicit because
+                Bills, Payments and Members share one route name.
+            --}}
+            @php($section = request()->routeIs('households.show') ? (request()->route('section') ?? 'bills') : null)
+
             <flux:sidebar.nav>
                 <flux:sidebar.item icon="home" :href="route('dashboard')" :current="request()->routeIs('dashboard')" wire:navigate>
-                    {{ __('Dashboard') }}
-                </flux:sidebar.item>
-
-                <flux:sidebar.item icon="users" :href="route('households.index')" :current="request()->routeIs('households.*')" wire:navigate>
-                    {{ __('Households') }}
+                    {{ __('Home') }}
                 </flux:sidebar.item>
 
                 @if ($currentHousehold)
-                    {{-- Bills lives on the household page, where Households is already highlighted; :current="false" stops Flux auto-highlighting it too. --}}
-                    <flux:sidebar.item icon="document-text" :href="route('households.show', $currentHousehold).'#bills'" :current="false" wire:navigate>
+                    <flux:sidebar.item icon="document-text" :href="route('households.show', $currentHousehold)" :current="$section === 'bills'" wire:navigate data-test="nav-bills">
                         {{ __('Bills') }}
+                    </flux:sidebar.item>
+
+                    <flux:sidebar.item icon="banknotes" :href="route('households.show', [$currentHousehold, 'payments'])" :current="$section === 'payments'" wire:navigate data-test="nav-payments">
+                        {{ __('Payments') }}
+                    </flux:sidebar.item>
+
+                    <flux:sidebar.item icon="users" :href="route('households.show', [$currentHousehold, 'members'])" :current="$section === 'members'" wire:navigate data-test="nav-members">
+                        {{ __('Members') }}
+                    </flux:sidebar.item>
+                @else
+                    <flux:sidebar.item icon="users" :href="route('households.index')" :current="request()->routeIs('households.index')" wire:navigate>
+                        {{ __('Households') }}
                     </flux:sidebar.item>
                 @endif
             </flux:sidebar.nav>

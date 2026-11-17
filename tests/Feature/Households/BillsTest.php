@@ -168,7 +168,10 @@ test('the page shows real totals, balance and who owes who', function () {
     Livewire::test('pages::households.show', ['household' => $household])
         ->assertSeeHtml('data-test="month-total">£30.00')
         ->assertSeeHtml('data-test="your-share">£10.00')
-        ->assertSeeInOrder(['Your balance', '-£10.00', 'You owe overall'])
+        ->assertSeeInOrder(['Your balance', '-£10.00', 'You owe overall']);
+
+    // Who owes who lives in the Payments section.
+    Livewire::test('pages::households.show', ['household' => $household, 'section' => 'payments'])
         ->assertSeeInOrder(['Who owes who', 'You', 'owe', 'Alice', '£10.00', 'Cara', 'owes', 'Alice', '£10.00']);
 });
 
@@ -191,8 +194,11 @@ test('a household with no bills shows the empty state', function () {
     actingAs($alice);
 
     Livewire::test('pages::households.show', ['household' => $household])
-        ->assertSee('No bills yet')
-        ->assertSee('square. Nothing to settle');
+        ->assertSee('No bills yet');
+
+    Livewire::test('pages::households.show', ['household' => $household, 'section' => 'payments'])
+        ->assertSee('square. Nothing to settle')
+        ->assertSee('No payments yet');
 });
 
 test('a split error is shown once', function () {

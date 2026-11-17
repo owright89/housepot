@@ -77,8 +77,8 @@ test('only the owner sees the invite buttons', function () {
     $member = User::factory()->create();
     $household = Household::factory()->withOwner($owner)->withMember($member)->create();
 
-    actingAs($owner)->get(route('households.show', $household))->assertSee('Invite housemate');
-    actingAs($member)->get(route('households.show', $household))->assertDontSee('Invite housemate');
+    actingAs($owner)->get(route('households.show', [$household, 'members']))->assertSee('Invite housemate');
+    actingAs($member)->get(route('households.show', [$household, 'members']))->assertDontSee('Invite housemate');
 });
 
 test('owner opening the invite modal gets a link', function () {
@@ -164,12 +164,37 @@ test('the owner of an archived household cannot create an invite', function () {
     expect($household->invites()->count())->toBe(0);
 });
 
-test('only the Households nav item is highlighted on a household page', function () {
+test('each section has its own URL, title and highlighted nav item', function (?string $section, string $title, string $navItem) {
+    $user = User::factory()->create();
+    $household = Household::factory()->withOwner($user)->create(['name' => 'Flat 2']);
+
+    $html = actingAs($user)->get(route('households.show', array_filter([$household, $section])))
+        ->assertOk()
+        ->assertSee("{$title} · Flat 2 - ")
+        ->getContent();
+
+    // Exactly one nav item is current (the attribute itself, not the `data-current:` styling classes)…
+    expect(preg_match_all('/\sdata-current(?=[\s>=])/', $html))->toBe(1)
+        // …and it's the right one.
+        ->and(preg_match('/<a[^>]*data-current[^>]*data-test="'.$navItem.'"|<a[^>]*data-test="'.$navItem.'"[^>]*data-current/', $html))->toBe(1);
+})->with([
+    'bills' => [null, 'Bills', 'nav-bills'],
+    'payments' => ['payments', 'Payments', 'nav-payments'],
+    'members' => ['members', 'Members', 'nav-members'],
+]);
+
+test('an unknown section is a 404', function () {
     $user = User::factory()->create();
     $household = Household::factory()->withOwner($user)->create();
 
-    $html = actingAs($user)->get(route('households.show', $household))->assertOk()->getContent();
+    actingAs($user)->get('/households/'.$household->id.'/nonsense')->assertNotFound();
+});
 
-    // The attribute itself, not the many `data-current:` styling classes.
-    expect(preg_match_all('/\sdata-current(?=[\s>=])/', $html))->toBe(1);
+test('the sidebar has no Households item once you have a household', function () {
+    $user = User::factory()->create();
+    Household::factory()->withOwner($user)->create();
+
+    actingAs($user)->get(route('dashboard'))
+        ->assertSeeHtml('data-test="nav-payments"')
+        ->assertDontSeeHtml('href="'.route('households.index').'" data-flux-sidebar-item');
 });

@@ -35,6 +35,14 @@ new class extends Component
     public Household $household;
 
     /**
+     * Which part of the household is shown: bills, payments or members. Each has its own URL
+     * (households/{id}, /payments, /members) and nav item; one component keeps the shared
+     * actions, modals and live listeners in one place.
+     */
+    #[Locked]
+    public string $section = 'bills';
+
+    /**
      * Bills table filter: all, you-paid or you-owe.
      */
     public string $filter = 'all';
@@ -60,8 +68,10 @@ new class extends Component
 
     public string $payAmount = '';
 
-    public function mount(): void
+    public function mount(string $section = 'bills'): void
     {
+        $this->section = in_array($section, ['bills', 'payments', 'members'], true) ? $section : 'bills';
+
         $this->viewerId = Auth::id();
 
         // Remember this household so the sidebar switcher and dashboard open it next time.
@@ -117,6 +127,34 @@ new class extends Component
             ->where(fn ($query) => $query->where('to_user_id', Auth::id())->orWhere('from_user_id', Auth::id()))
             ->latest('id')
             ->get();
+    }
+
+    /**
+     * Answered payments (confirmed or not received), newest first.
+     *
+     * @return Collection<int, Settlement>
+     */
+    #[Computed]
+    public function paymentHistory(): Collection
+    {
+        return $this->household->settlements()
+            ->with(['fromUser', 'toUser'])
+            ->where('status', '!=', SettlementStatus::Pending)
+            ->latest('updated_at')
+            ->limit(30)
+            ->get();
+    }
+
+    /**
+     * "You" for the viewer, otherwise a first name.
+     */
+    public function nameFor(User $user, bool $lower = false): string
+    {
+        if ($user->is(Auth::user())) {
+            return $lower ? __('you') : __('You');
+        }
+
+        return Str::before($user->name, ' ');
     }
 
     /**
@@ -345,7 +383,7 @@ new class extends Component
     #[On('echo-reconnected')]
     public function refreshFigures(): void
     {
-        unset($this->bills, $this->summary, $this->pendingPayments);
+        unset($this->bills, $this->summary, $this->pendingPayments, $this->paymentHistory);
     }
 
     /**
@@ -369,7 +407,7 @@ new class extends Component
     #[On('echo-private:App.Models.User.{viewerId},.settlement.rejected')]
     public function paymentRejected(array $event): void
     {
-        unset($this->pendingPayments);
+        unset($this->pendingPayments, $this->paymentHistory);
 
         Flux::toast(variant: 'warning', text: __(':name didn\'t confirm your :amount payment.', ['name' => $event['actor_name'], 'amount' => $event['amount']]));
     }
@@ -382,7 +420,7 @@ new class extends Component
     #[On('echo-private:households.{household.id},.settlement.confirmed')]
     public function paymentConfirmed(array $event): void
     {
-        unset($this->pendingPayments);
+        unset($this->pendingPayments, $this->paymentHistory);
 
         if ($event['actor_id'] !== Auth::id()) {
             Flux::toast(text: __(':name confirmed :from\'s :amount payment.', ['name' => $event['actor_name'], 'from' => $event['from_name'], 'amount' => $event['amount']]));
@@ -432,7 +470,13 @@ new class extends Component
 
     public function render()
     {
-        return $this->view()->title($this->household->name);
+        $section = match ($this->section) {
+            'payments' => __('Payments'),
+            'members' => __('Members'),
+            default => __('Bills'),
+        };
+
+        return $this->view()->title($section.' · '.$this->household->name);
     }
 };
 ?>
@@ -442,11 +486,6 @@ new class extends Component
 @php($isOwner = $household->roleOf(auth()->user()) === HouseholdRole::Owner)
 
 <section class="w-full">
-    <flux:breadcrumbs class="mb-3">
-        <flux:breadcrumbs.item :href="route('households.index')" wire:navigate>{{ __('Households') }}</flux:breadcrumbs.item>
-        <flux:breadcrumbs.item>{{ $household->name }}</flux:breadcrumbs.item>
-    </flux:breadcrumbs>
-
     <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div class="min-w-0">
             <flux:heading size="xl" level="1" class="break-words text-2xl! font-extrabold!">{{ $household->name }}</flux:heading>
@@ -460,13 +499,17 @@ new class extends Component
             </div>
         </div>
 
+        {{-- The main action for the section you're on --}}
         <div class="flex gap-2">
-            @can('invite', $household)
-                <flux:button icon="user-plus" wire:click="openInvite" data-test="invite-button">{{ __('Invite') }}</flux:button>
-            @endcan
-            @can('create', [Expense::class, $household])
-                <flux:button variant="primary" icon="plus" wire:click="addBill" data-test="add-bill-button">{{ __('Add bill') }}</flux:button>
-            @endcan
+            @if ($section === 'members')
+                @can('invite', $household)
+                    <flux:button variant="primary" icon="user-plus" wire:click="openInvite" data-test="invite-button">{{ __('Invite') }}</flux:button>
+                @endcan
+            @elseif ($section === 'bills')
+                @can('create', [Expense::class, $household])
+                    <flux:button variant="primary" icon="plus" wire:click="addBill" data-test="add-bill-button">{{ __('Add bill') }}</flux:button>
+                @endcan
+            @endif
         </div>
     </div>
 
@@ -484,6 +527,7 @@ new class extends Component
         </flux:callout>
     @endif
 
+    @if ($section === 'bills')
     <x-stat-group class="mb-6">
         <x-stat :label="__('Total this month')" :caption="trans_choice(':count bill|:count bills', $summary->monthBillCount)" class="text-ink" data-test="month-total">
             {{ Money::format($summary->monthTotal, $currency) }}
@@ -500,10 +544,11 @@ new class extends Component
             {{ Money::signed($summary->yourBalance, $currency) }}
         </x-stat>
     </x-stat-group>
+    @endif
 
-    <div class="grid gap-6 lg:grid-cols-3">
+    @if ($section === 'bills')
         {{-- Bills --}}
-        <flux:card class="p-0! lg:col-span-2" id="bills">
+        <flux:card class="p-0!" id="bills">
             <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
                 <flux:heading size="lg" level="2">{{ __('Bills') }}</flux:heading>
 
@@ -628,8 +673,9 @@ new class extends Component
                 </div>
             @endif
         </flux:card>
-
-        <div class="flex flex-col gap-6">
+    @elseif ($section === 'payments')
+        <div class="grid gap-6 lg:grid-cols-3">
+            <div class="flex flex-col gap-6 lg:order-2">
             {{-- Payments waiting for an answer: only the recipient can confirm --}}
             @if ($this->pendingPayments->isNotEmpty())
                 <flux:card data-test="pending-payments">
@@ -662,7 +708,6 @@ new class extends Component
                     </ul>
                 </flux:card>
             @endif
-
             {{-- Who owes who: suggested payments from the ledger --}}
             <flux:card>
                 <flux:heading size="lg" level="2">{{ __('Who owes who') }}</flux:heading>
@@ -696,7 +741,41 @@ new class extends Component
                     @endcan
                 @endif
             </flux:card>
+            </div>
 
+            {{-- Payment history: answered settlements, newest first --}}
+            <flux:card class="p-0! lg:order-1 lg:col-span-2" data-test="payment-history">
+                <div class="px-5 py-4">
+                    <flux:heading size="lg" level="2">{{ __('Payment history') }}</flux:heading>
+                </div>
+
+                @if ($this->paymentHistory->isEmpty())
+                    <div class="border-t border-line px-5 py-10 text-center">
+                        <p class="font-bold text-ink">{{ __('No payments yet') }}</p>
+                        <p class="mt-1 text-sm text-muted">{{ __('When someone settles up and it\'s confirmed, it shows here.') }}</p>
+                    </div>
+                @else
+                    <ul class="divide-y divide-line border-t border-line" role="list">
+                        @foreach ($this->paymentHistory as $payment)
+                            @php($confirmed = $payment->status === SettlementStatus::Confirmed)
+                            <li wire:key="history-{{ $payment->id }}" class="flex items-center gap-3 px-5 py-3">
+                                <x-avatar :user="$payment->fromUser" />
+                                <div class="min-w-0 flex-1">
+                                    <p class="truncate text-sm font-semibold text-ink">
+                                        {{ __(':from paid :to', ['from' => $this->nameFor($payment->fromUser), 'to' => $this->nameFor($payment->toUser, lower: true)]) }}
+                                    </p>
+                                    <p class="text-xs text-muted">{{ ($payment->confirmed_at ?? $payment->updated_at)->format('j M Y') }}</p>
+                                </div>
+                                <x-chip :variant="$confirmed ? 'primary' : 'neutral'">{{ $confirmed ? __('Confirmed') : __('Not received') }}</x-chip>
+                                <p @class(['text-sm font-bold', 'text-ink' => $confirmed, 'text-muted line-through' => ! $confirmed])>{{ Money::format($payment->amount, $currency) }}</p>
+                            </li>
+                        @endforeach
+                    </ul>
+                @endif
+            </flux:card>
+        </div>
+    @else
+        <div class="max-w-2xl">
             {{-- Members --}}
             <flux:card>
                 <flux:heading size="lg" level="2">{{ __('Members') }}</flux:heading>
@@ -727,7 +806,8 @@ new class extends Component
                 @endcan
             </flux:card>
         </div>
-    </div>
+    @endif
+
     @can('invite', $household)
         <flux:modal name="invite-housemate" class="w-full max-w-md">
             <div class="space-y-6">

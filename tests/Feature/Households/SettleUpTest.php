@@ -38,7 +38,7 @@ test('settle up is prefilled with what you owe', function () {
     [$household, $alice, $bob] = owingFlat();
     actingAs($bob);
 
-    Livewire::test('pages::households.show', ['household' => $household])
+    Livewire::test('pages::households.show', ['household' => $household, 'section' => 'payments'])
         ->assertSee('Settle up')
         ->call('settleUp')
         ->assertSet('payTo', $alice->id)
@@ -49,7 +49,7 @@ test('recording a payment leaves it pending until the recipient confirms', funct
     [$household, $alice, $bob] = owingFlat();
     actingAs($bob);
 
-    Livewire::test('pages::households.show', ['household' => $household])
+    Livewire::test('pages::households.show', ['household' => $household, 'section' => 'payments'])
         ->call('settleUp')
         ->call('recordPayment')
         ->assertHasNoErrors()
@@ -65,7 +65,7 @@ test('the recipient confirms a payment and balances update', function () {
     $settlement = app(RequestSettlement::class)->handle($bob, $household, $alice, 1500);
     actingAs($alice);
 
-    Livewire::test('pages::households.show', ['household' => $household])
+    Livewire::test('pages::households.show', ['household' => $household, 'section' => 'payments'])
         ->assertSee('Bob says they paid you')
         ->call('confirmPayment', $settlement->id)
         ->assertDontSee('Bob says they paid you')
@@ -80,7 +80,7 @@ test('the recipient can reject a payment', function () {
     $settlement = app(RequestSettlement::class)->handle($bob, $household, $alice, 1500);
     actingAs($alice);
 
-    Livewire::test('pages::households.show', ['household' => $household])
+    Livewire::test('pages::households.show', ['household' => $household, 'section' => 'payments'])
         ->call('rejectPayment', $settlement->id)
         ->assertDontSee('Bob says they paid you');
 
@@ -95,7 +95,7 @@ test('only the recipient can answer a payment', function (string $method) {
     foreach ([$bob, $cara] as $user) {
         actingAs($user);
 
-        Livewire::test('pages::households.show', ['household' => $household])
+        Livewire::test('pages::households.show', ['household' => $household, 'section' => 'payments'])
             ->call($method, $settlement->id)
             ->assertForbidden();
     }
@@ -113,7 +113,7 @@ test('a payment needs a housemate and a valid amount', function (?string $to, st
         default => null,
     };
 
-    Livewire::test('pages::households.show', ['household' => $household])
+    Livewire::test('pages::households.show', ['household' => $household, 'section' => 'payments'])
         ->set('payTo', $payTo)
         ->set('payAmount', $amount)
         ->call('recordPayment')
@@ -131,7 +131,7 @@ test('the recipient\'s page picks up a new payment from their private channel', 
     [$household, $alice, $bob] = owingFlat();
     actingAs($alice);
 
-    $page = Livewire::test('pages::households.show', ['household' => $household])
+    $page = Livewire::test('pages::households.show', ['household' => $household, 'section' => 'payments'])
         ->assertDontSee('Bob says they paid you');
 
     app(RequestSettlement::class)->handle($bob, $household, $alice, 1500);

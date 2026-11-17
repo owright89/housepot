@@ -438,7 +438,7 @@ new #[Title('Dashboard')] class extends Component {
                             @endforeach
                         </ul>
 
-                        <flux:button class="mt-4 w-full" :href="route('households.show', $this->household)" wire:navigate data-test="dashboard-settle-up">{{ __('Settle up') }}</flux:button>
+                        <flux:button class="mt-4 w-full" :href="route('households.show', [$this->household, 'payments'])" wire:navigate data-test="dashboard-settle-up">{{ __('Settle up') }}</flux:button>
                     @endif
                 </flux:card>
 
