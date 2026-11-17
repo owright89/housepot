@@ -22,6 +22,7 @@ use App\Models\User;
 use App\Support\Money;
 use Flux\Flux;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
@@ -449,11 +450,14 @@ new class extends Component
     <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div class="min-w-0">
             <flux:heading size="xl" level="1" class="break-words text-2xl! font-extrabold!">{{ $household->name }}</flux:heading>
-            <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
-                <span>{{ $household->currency }} · {{ trans_choice(':count member|:count members', $this->members->count()) }}@if ($isOwner) · {{ __('You\'re the owner') }}@endif</span>
+            <p class="mt-1 text-sm text-muted">
+                {{ $household->currency }} · {{ trans_choice(':count member|:count members', $this->members->count()) }}@if ($isOwner) · {{ __('You\'re the owner') }}@endif
+            </p>
+            {{-- Connection state and who's here share one row, so they never split across the meta line --}}
+            <div class="mt-2 flex flex-wrap items-center gap-2">
                 <x-live-indicator />
                 <x-household-presence :household="$household" :members="$this->members" />
-            </p>
+            </div>
         </div>
 
         <div class="flex gap-2">
@@ -480,26 +484,22 @@ new class extends Component
         </flux:callout>
     @endif
 
-    <div class="mb-6 grid gap-4 sm:grid-cols-3">
-        <flux:card>
-            <flux:text size="sm">{{ __('Total this month') }}</flux:text>
-            <p class="mt-1 text-2xl font-extrabold text-ink" data-test="month-total">{{ Money::format($summary->monthTotal, $currency) }}</p>
-            <flux:text size="sm" class="mt-1">{{ trans_choice(':count bill|:count bills', $summary->monthBillCount) }}</flux:text>
-        </flux:card>
-        <flux:card>
-            <flux:text size="sm">{{ __('Your share this month') }}</flux:text>
-            <p class="mt-1 text-2xl font-extrabold text-ink" data-test="your-share">{{ Money::format($summary->yourMonthShare, $currency) }}</p>
-        </flux:card>
-        <flux:card>
-            <flux:text size="sm">{{ __('Your balance') }}</flux:text>
-            <p @class(['mt-1 text-2xl font-extrabold', 'text-primary-text' => $summary->yourBalance > 0, 'text-coral' => $summary->yourBalance < 0, 'text-ink' => $summary->yourBalance === 0]) data-test="your-balance">
-                {{ Money::signed($summary->yourBalance, $currency) }}
-            </p>
-            <flux:text size="sm" class="mt-1">
-                {{ $summary->yourBalance > 0 ? __('You\'re owed overall') : ($summary->yourBalance < 0 ? __('You owe overall') : __('All square')) }}
-            </flux:text>
-        </flux:card>
-    </div>
+    <x-stat-group class="mb-6">
+        <x-stat :label="__('Total this month')" :caption="trans_choice(':count bill|:count bills', $summary->monthBillCount)" class="text-ink" data-test="month-total">
+            {{ Money::format($summary->monthTotal, $currency) }}
+        </x-stat>
+        <x-stat :label="__('Your share this month')" class="text-ink" data-test="your-share">
+            {{ Money::format($summary->yourMonthShare, $currency) }}
+        </x-stat>
+        <x-stat
+            :label="__('Your balance')"
+            :caption="$summary->yourBalance > 0 ? __('You\'re owed overall') : ($summary->yourBalance < 0 ? __('You owe overall') : __('All square'))"
+            :class="Arr::toCssClasses(['text-primary-text' => $summary->yourBalance > 0, 'text-coral' => $summary->yourBalance < 0, 'text-ink' => $summary->yourBalance === 0])"
+            data-test="your-balance"
+        >
+            {{ Money::signed($summary->yourBalance, $currency) }}
+        </x-stat>
+    </x-stat-group>
 
     <div class="grid gap-6 lg:grid-cols-3">
         {{-- Bills --}}
@@ -535,7 +535,44 @@ new class extends Component
                     @endcan
                 </div>
             @else
-                <div class="overflow-x-auto border-t border-line">
+                {{-- Phones: one stacked row per bill (the table needs 640px). Same data and actions. --}}
+                <ul class="divide-y divide-line border-t border-line sm:hidden" role="list" data-test="bills-list">
+                    @forelse ($this->filteredBills() as $bill)
+                        @php($category = $bill->displayCategory())
+                        <li wire:key="bill-row-{{ $bill->id }}" class="flex items-start gap-3 px-4 py-3">
+                            <div class="min-w-0 flex-1">
+                                <p class="truncate font-bold text-ink">{{ $bill->description }}</p>
+                                <p class="mt-0.5 flex items-center gap-1 text-xs text-muted">
+                                    <flux:icon :icon="$category->icon()" variant="micro" class="size-3.5 shrink-0" aria-hidden="true" />
+                                    <span class="truncate">
+                                        {{ $category->label() }} · {{ $bill->spent_on->format('j M') }} ·
+                                        {{ $bill->payer->is(auth()->user()) ? __('Paid by you') : __('Paid by :name', ['name' => Str::before($bill->payer->name, ' ')]) }}
+                                    </span>
+                                </p>
+                                <div class="mt-1.5"><x-bill-status :status="$this->statusOf($bill)" /></div>
+                            </div>
+
+                            <div class="shrink-0 text-end">
+                                <p class="font-bold text-ink">{{ Money::format($this->shareOf($bill), $currency) }}</p>
+                                <p class="text-xs text-muted">{{ __('of :total', ['total' => Money::format($bill->amount, $currency)]) }}</p>
+                            </div>
+
+                            @can('update', $bill)
+                                <flux:dropdown align="end">
+                                    <flux:button variant="ghost" size="sm" icon="ellipsis-horizontal" :aria-label="__('Actions for :bill', ['bill' => $bill->description])" />
+                                    <flux:menu>
+                                        <flux:menu.item icon="pencil-square" wire:click="editBill({{ $bill->id }})">{{ __('Edit') }}</flux:menu.item>
+                                        <flux:menu.item icon="trash" variant="danger" wire:click="confirmDelete({{ $bill->id }})">{{ __('Delete') }}</flux:menu.item>
+                                    </flux:menu>
+                                </flux:dropdown>
+                            @endcan
+                        </li>
+                    @empty
+                        <li class="px-4 py-8 text-center text-sm text-muted">{{ __('No bills here.') }}</li>
+                    @endforelse
+                </ul>
+
+                <div class="hidden overflow-x-auto border-t border-line sm:block">
                     <table class="w-full min-w-[40rem] text-sm">
                         <thead>
                             <tr class="text-xs text-muted">

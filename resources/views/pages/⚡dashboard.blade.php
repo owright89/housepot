@@ -313,27 +313,24 @@ new #[Title('Dashboard')] class extends Component {
         @php($youOwe = $summary->youOwe(auth()->user()))
 
         {{-- Summary --}}
-        <div class="mb-6 grid gap-4 md:grid-cols-3">
-            <flux:card>
-                <flux:text size="sm">{{ __('You\'re owed') }}</flux:text>
-                <p class="mt-1 text-3xl font-extrabold text-primary-text" data-test="owed-to-you">{{ Money::format(array_sum(array_column($owedToYou, 'amount')), $currency) }}</p>
-                <flux:text size="sm" class="mt-1">{{ $this->peopleCaption($owedToYou, 'from') }}</flux:text>
-            </flux:card>
+        <x-stat-group class="mb-6">
+            <x-stat :label="__('You\'re owed')" :caption="$this->peopleCaption($owedToYou, 'from')" class="text-primary-text" data-test="owed-to-you">
+                {{ Money::format(array_sum(array_column($owedToYou, 'amount')), $currency) }}
+            </x-stat>
 
-            <flux:card>
-                <flux:text size="sm">{{ __('You owe') }}</flux:text>
-                <p class="mt-1 text-3xl font-extrabold text-coral" data-test="you-owe">{{ Money::format(array_sum(array_column($youOwe, 'amount')), $currency) }}</p>
-                <flux:text size="sm" class="mt-1">{{ $this->peopleCaption($youOwe, 'to') }}</flux:text>
-            </flux:card>
+            <x-stat :label="__('You owe')" :caption="$this->peopleCaption($youOwe, 'to')" class="text-coral" data-test="you-owe">
+                {{ Money::format(array_sum(array_column($youOwe, 'amount')), $currency) }}
+            </x-stat>
 
-            <flux:card>
-                <flux:text size="sm">{{ __('Your share this month') }}</flux:text>
-                <p class="mt-1 text-3xl font-extrabold text-ink" data-test="your-share">{{ Money::format($summary->yourMonthShare, $currency) }}</p>
-                <flux:text size="sm" class="mt-1">
-                    {{ __('Of :total across :bills', ['total' => Money::format($summary->monthTotal, $currency), 'bills' => trans_choice(':count bill|:count bills', $summary->monthBillCount)]) }}
-                </flux:text>
-            </flux:card>
-        </div>
+            <x-stat
+                :label="__('Your share this month')"
+                :caption="__('Of :total across :bills', ['total' => Money::format($summary->monthTotal, $currency), 'bills' => trans_choice(':count bill|:count bills', $summary->monthBillCount)])"
+                class="text-ink"
+                data-test="your-share"
+            >
+                {{ Money::format($summary->yourMonthShare, $currency) }}
+            </x-stat>
+        </x-stat-group>
 
         <div class="grid gap-6 lg:grid-cols-3">
             <div class="flex flex-col gap-6 lg:col-span-2">
