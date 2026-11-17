@@ -153,9 +153,9 @@ REVERB_APP_SECRET=PASTE
 
 # Email via Resend's SMTP (§6)
 MAIL_MAILER=smtp
-MAIL_SCHEME=smtps
+MAIL_SCHEME=smtp
 MAIL_HOST=smtp.resend.com
-MAIL_PORT=465
+MAIL_PORT=2587
 MAIL_USERNAME=resend
 MAIL_PASSWORD=PASTE_RESEND_API_KEY
 MAIL_FROM_ADDRESS=hello@owright.dev
@@ -184,7 +184,13 @@ Production needs real email for sign-up verification and password resets.
 3. **API Keys → Create** with **Sending access** only, restricted to that domain. Paste it as `MAIL_PASSWORD`.
 4. Make sure `MAIL_FROM_ADDRESS` uses the verified domain.
 
-Housepot uses Resend's SMTP server, so no extra package is needed.
+Housepot uses Resend's SMTP server, so no extra package is needed. It uses port **2587** (STARTTLS) because this server's host blocks outbound 465 and 587. To check which ports are open from the app container:
+
+```bash
+for port in 465 587 2587; do
+  sudo -u deploy docker compose exec -T app php -r "echo $port, ': ', @fsockopen('smtp.resend.com', $port, \$e, \$s, 5) ? 'open' : 'blocked', PHP_EOL;"
+done
+```
 
 ## 7. Let the server pull images
 
@@ -304,5 +310,6 @@ docker compose exec app php artisan about
 | "Live" chip stuck on *Reconnecting…* | The GitHub `REVERB_APP_KEY` variable doesn't match `.env` (rebuild after fixing), or the Caddy block is missing the `@reverb` route. The browser console shows the failing `wss://` URL. |
 | Pages don't update live but the chip is green | `horizon` isn't running: broadcasts are queued. `docker compose logs horizon`. |
 | No verification email | `MAIL_*` settings or the Resend domain isn't verified yet; see Resend's Logs and `docker compose logs app`. |
+| Registration hangs ~30s, then "Connection timed out" | The host blocks that SMTP port. Use `MAIL_PORT=2587` with `MAIL_SCHEME=smtp` (§6). |
 | `/horizon` gives 403 | Your email isn't in `HORIZON_ADMINS` (then `docker compose up -d`). |
 | `.env` changes ignored | Use `docker compose up -d`, not `restart`. |
