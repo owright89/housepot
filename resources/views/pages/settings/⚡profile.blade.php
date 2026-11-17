@@ -81,8 +81,9 @@ new #[Title('Profile settings')] class extends Component {
 
     <flux:heading level="2" class="sr-only">{{ __('Profile settings') }}</flux:heading>
 
-    <x-pages::settings.layout :heading="__('Profile')" :subheading="__('Update your name and email address')">
-        <form wire:submit="updateProfileInformation" class="my-6 w-full space-y-6">
+    <x-pages::settings.layout>
+        <x-settings-card :heading="__('Profile')" :subheading="__('Update your name and email address.')">
+        <form wire:submit="updateProfileInformation" class="w-full space-y-6">
             <flux:input wire:model="name" :label="__('Name')" type="text" required autofocus autocomplete="name" />
 
             <div>
@@ -99,7 +100,7 @@ new #[Title('Profile settings')] class extends Component {
                         </flux:text>
 
                         @if (session('status') === 'verification-link-sent')
-                            <flux:text class="mt-2 font-medium !dark:text-green-400 !text-green-600">
+                            <flux:text class="mt-2 font-medium text-primary-text!">
                                 {{ __('A new verification link has been sent to your email address.') }}
                             </flux:text>
                         @endif
@@ -107,15 +108,11 @@ new #[Title('Profile settings')] class extends Component {
                 @endif
             </div>
 
-            <div class="flex items-center gap-4">
-                <div class="flex items-center justify-end">
-                    <flux:button variant="primary" type="submit" class="w-full" data-test="update-profile-button">
-                        {{ __('Save') }}
-                    </flux:button>
-                </div>
-
-            </div>
+            <flux:button variant="primary" type="submit" data-test="update-profile-button">
+                {{ __('Save') }}
+            </flux:button>
         </form>
+        </x-settings-card>
 
         @if ($this->showDeleteUser)
             <livewire:pages::settings.delete-user-form />
