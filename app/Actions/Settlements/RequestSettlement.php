@@ -3,6 +3,7 @@
 namespace App\Actions\Settlements;
 
 use App\Enums\AuditEvent;
+use App\Events\SettlementRequested;
 use App\Ledger\InvalidSettlement;
 use App\Models\Audit;
 use App\Models\Household;
@@ -48,6 +49,9 @@ class RequestSettlement
                 'to_user_id' => [null, $to->id],
                 'amount' => [null, $amount],
             ]);
+
+            // Sent after the transaction commits (ShouldDispatchAfterCommit).
+            SettlementRequested::dispatch($settlement, $from);
 
             return $settlement;
         });

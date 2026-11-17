@@ -5,9 +5,11 @@ use App\Ledger\HouseholdSummary;
 use App\Models\Audit;
 use App\Models\Expense;
 use App\Models\Household;
+use App\Models\Settlement;
 use App\Models\User;
 use App\Support\Money;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
@@ -29,7 +31,13 @@ new #[Title('Dashboard')] class extends Component {
      */
     public function getListeners(): array
     {
-        $listeners = ['echo-reconnected' => 'refreshFigures'];
+        $user = 'echo-private:App.Models.User.'.Auth::id();
+
+        $listeners = [
+            'echo-reconnected' => 'refreshFigures',
+            "{$user},.settlement.requested" => 'paymentRequested',
+            "{$user},.settlement.rejected" => 'paymentRejected',
+        ];
 
         if ($this->household !== null) {
             $channel = "echo-private:households.{$this->household->id}";
@@ -38,6 +46,7 @@ new #[Title('Dashboard')] class extends Component {
             $listeners["{$channel},.expense.recorded"] = 'billAdded';
             $listeners["{$channel},.expense.updated"] = 'billEdited';
             $listeners["{$channel},.expense.deleted"] = 'billDeleted';
+            $listeners["{$channel},.settlement.confirmed"] = 'paymentConfirmed';
         }
 
         return $listeners;
@@ -73,6 +82,36 @@ new #[Title('Dashboard')] class extends Component {
     public function billDeleted(array $event): void
     {
         $this->announce($event, __(':name deleted :bill', ['name' => $event['actor_name'], 'bill' => $event['description']]));
+    }
+
+    /**
+     * @param  array{actor_name: string, amount: string}  $event
+     */
+    public function paymentRequested(array $event): void
+    {
+        Flux::toast(text: __(':name says they paid you :amount. Please confirm it.', ['name' => $event['actor_name'], 'amount' => $event['amount']]));
+    }
+
+    /**
+     * @param  array{actor_name: string, amount: string}  $event
+     */
+    public function paymentRejected(array $event): void
+    {
+        unset($this->activity);
+
+        Flux::toast(variant: 'warning', text: __(':name didn\'t confirm your :amount payment.', ['name' => $event['actor_name'], 'amount' => $event['amount']]));
+    }
+
+    /**
+     * @param  array{actor_id: int, actor_name: string, from_name: string, amount: string}  $event
+     */
+    public function paymentConfirmed(array $event): void
+    {
+        unset($this->activity);
+
+        if ($event['actor_id'] !== Auth::id()) {
+            Flux::toast(text: __(':name confirmed :from\'s :amount payment.', ['name' => $event['actor_name'], 'from' => $event['from_name'], 'amount' => $event['amount']]));
+        }
     }
 
     /**
@@ -129,10 +168,42 @@ new #[Title('Dashboard')] class extends Component {
     public function activity(): Collection
     {
         return $this->household->audits()
-            ->with('user')
+            ->with(['user', 'subject' => fn (MorphTo $subject) => $subject->morphWith([
+                Settlement::class => ['fromUser', 'toUser'],
+            ])])
             ->latest('id')
             ->limit(5)
             ->get();
+    }
+
+    /**
+     * One line of the activity feed, e.g. "You added Energy" or "Alice confirmed Bob's £15 payment".
+     */
+    public function describe(Audit $audit): string
+    {
+        $name = fn (?User $user) => $user?->is(Auth::user()) ? __('you') : Str::before($user?->name ?? __('someone'), ' ');
+        $who = Str::ucfirst($name($audit->user));
+
+        if ($audit->subject_type === 'settlement') {
+            /** @var Settlement|null $payment */
+            $payment = $audit->subject;
+            $amount = $payment ? Money::format($payment->amount, $this->household->currency) : '';
+
+            return match ($audit->event) {
+                AuditEvent::Created => __(':who recorded paying :to :amount', ['who' => $who, 'to' => $name($payment?->toUser), 'amount' => $amount]),
+                AuditEvent::Confirmed => __(':who confirmed :from\'s :amount payment', ['who' => $who, 'from' => $name($payment?->fromUser), 'amount' => $amount]),
+                AuditEvent::Rejected => __(':who didn\'t confirm :from\'s :amount payment', ['who' => $who, 'from' => $name($payment?->fromUser), 'amount' => $amount]),
+                default => __(':who changed a payment', ['who' => $who]),
+            };
+        }
+
+        $bill = $audit->changes['description'][1] ?? $audit->changes['description'][0] ?? $audit->subject?->description ?? __('a bill');
+
+        return match ($audit->event) {
+            AuditEvent::Created => __(':who added :bill', ['who' => $who, 'bill' => $bill]),
+            AuditEvent::Updated => __(':who edited :bill', ['who' => $who, 'bill' => $bill]),
+            default => __(':who deleted :bill', ['who' => $who, 'bill' => $bill]),
+        };
     }
 
     public function shareOf(Expense $bill): int
@@ -306,8 +377,7 @@ new #[Title('Dashboard')] class extends Component {
                             @endforeach
                         </ul>
 
-                        {{-- Settling up arrives in roadmap step 7. --}}
-                        <flux:button class="mt-4 w-full" disabled>{{ __('Settle up (coming soon)') }}</flux:button>
+                        <flux:button class="mt-4 w-full" :href="route('households.show', $this->household)" wire:navigate data-test="dashboard-settle-up">{{ __('Settle up') }}</flux:button>
                     @endif
                 </flux:card>
 
@@ -320,19 +390,10 @@ new #[Title('Dashboard')] class extends Component {
                     @else
                         <ul class="mt-4 space-y-3" role="list">
                             @foreach ($this->activity as $audit)
-                                @php($you = $audit->user->is(auth()->user()))
-                                @php($who = $you ? __('You') : Str::before($audit->user->name, ' '))
-                                @php($bill = $audit->changes['description'][1] ?? $audit->changes['description'][0] ?? optional($audit->subject)->description ?? __('a bill'))
                                 <li class="flex items-start gap-3">
                                     <x-avatar :user="$audit->user" />
                                     <div class="min-w-0">
-                                        <p class="text-sm font-semibold text-ink">
-                                            @switch($audit->event)
-                                                @case(AuditEvent::Created) {{ __(':who added :bill', ['who' => $who, 'bill' => $bill]) }} @break
-                                                @case(AuditEvent::Updated) {{ __(':who edited :bill', ['who' => $who, 'bill' => $bill]) }} @break
-                                                @default {{ __(':who deleted :bill', ['who' => $who, 'bill' => $bill]) }}
-                                            @endswitch
-                                        </p>
+                                        <p class="text-sm font-semibold text-ink">{{ $this->describe($audit) }}</p>
                                         <p class="text-xs text-muted">{{ $audit->created_at->diffForHumans() }}</p>
                                     </div>
                                 </li>

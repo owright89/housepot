@@ -5,6 +5,7 @@ namespace App\Actions\Settlements;
 use App\Enums\AuditEvent;
 use App\Enums\SettlementStatus;
 use App\Events\BalancesUpdated;
+use App\Events\SettlementConfirmed;
 use App\Ledger\InvalidSettlement;
 use App\Ledger\Ledger;
 use App\Models\Audit;
@@ -55,6 +56,7 @@ class ConfirmSettlement
             ]);
 
             // Sent after the transaction commits (ShouldDispatchAfterCommit).
+            SettlementConfirmed::dispatch($settlement, $actor);
             BalancesUpdated::dispatch($household->id);
 
             return $settlement;

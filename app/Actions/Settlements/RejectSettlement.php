@@ -4,6 +4,7 @@ namespace App\Actions\Settlements;
 
 use App\Enums\AuditEvent;
 use App\Enums\SettlementStatus;
+use App\Events\SettlementRejected;
 use App\Ledger\InvalidSettlement;
 use App\Models\Audit;
 use App\Models\Settlement;
@@ -40,6 +41,9 @@ class RejectSettlement
             Audit::record($actor, $household, $settlement, AuditEvent::Rejected, [
                 'status' => [SettlementStatus::Pending->value, SettlementStatus::Rejected->value],
             ]);
+
+            // Sent after the transaction commits (ShouldDispatchAfterCommit).
+            SettlementRejected::dispatch($settlement, $actor);
 
             return $settlement;
         });

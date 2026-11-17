@@ -4,13 +4,19 @@ use App\Actions\Expenses\DeleteExpense;
 use App\Actions\Expenses\RecordExpense;
 use App\Actions\Expenses\UpdateExpense;
 use App\Actions\Households\CreateInvite;
+use App\Actions\Settlements\ConfirmSettlement;
+use App\Actions\Settlements\RejectSettlement;
+use App\Actions\Settlements\RequestSettlement;
 use App\Enums\HouseholdRole;
+use App\Enums\SettlementStatus;
 use App\Ledger\HouseholdSummary;
 use App\Ledger\InvalidExpense;
+use App\Ledger\InvalidSettlement;
 use App\Ledger\StaleExpense;
 use App\Livewire\Forms\ExpenseForm;
 use App\Models\Expense;
 use App\Models\Household;
+use App\Models\Settlement;
 use App\Models\User;
 use App\Support\Money;
 use Flux\Flux;
@@ -18,6 +24,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Component;
 
@@ -42,8 +49,19 @@ new class extends Component
 
     public int $deletingVersion = 0;
 
+    /** Who's viewing: used to listen on their private channel for payments to confirm. */
+    #[Locked]
+    public int $viewerId;
+
+    /** Settle up form: who you paid and how much (as typed). */
+    public ?int $payTo = null;
+
+    public string $payAmount = '';
+
     public function mount(): void
     {
+        $this->viewerId = Auth::id();
+
         // Remember this household so the sidebar switcher and dashboard open it next time.
         session(['current_household_id' => $this->household->id]);
     }
@@ -81,6 +99,22 @@ new class extends Component
     public function summary(): HouseholdSummary
     {
         return HouseholdSummary::for($this->household, Auth::user());
+    }
+
+    /**
+     * Payments waiting for an answer that involve the viewer: ones to confirm, and ones they sent.
+     *
+     * @return Collection<int, Settlement>
+     */
+    #[Computed]
+    public function pendingPayments(): Collection
+    {
+        return $this->household->settlements()
+            ->with(['fromUser', 'toUser'])
+            ->where('status', SettlementStatus::Pending)
+            ->where(fn ($query) => $query->where('to_user_id', Auth::id())->orWhere('from_user_id', Auth::id()))
+            ->latest('id')
+            ->get();
     }
 
     /**
@@ -195,6 +229,87 @@ new class extends Component
     }
 
     /**
+     * Open the settle up form. Prefilled with the suggested payment to $to, or the viewer's
+     * biggest suggested payment when no one is given.
+     */
+    public function settleUp(?int $to = null): void
+    {
+        $this->authorize('create', [Settlement::class, $this->household]);
+
+        $suggestions = $this->summary->youOwe(Auth::user());
+        $suggestion = collect($suggestions)->first(fn (array $t) => $to === null || $t['to']->id === $to);
+
+        $this->resetErrorBag();
+        $this->payTo = $to ?? $suggestion['to']->id ?? null;
+        $this->payAmount = $suggestion ? Money::toInput($suggestion['amount']) : '';
+
+        Flux::modal('settle-up')->show();
+    }
+
+    public function recordPayment(RequestSettlement $requestSettlement): void
+    {
+        $this->authorize('create', [Settlement::class, $this->household]);
+
+        $to = $this->payTo === null ? null : $this->household->members()->find($this->payTo);
+
+        if ($to === null) {
+            $this->addError('payTo', __('Choose who you paid.'));
+
+            return;
+        }
+
+        $amount = Money::parse($this->payAmount);
+
+        if ($amount === null) {
+            $this->addError('payAmount', __('Enter an amount like 12.50.'));
+
+            return;
+        }
+
+        try {
+            $requestSettlement->handle(Auth::user(), $this->household, $to, $amount);
+        } catch (InvalidSettlement $e) {
+            $this->addError('payAmount', $e->getMessage());
+
+            return;
+        }
+
+        Flux::modal('settle-up')->close();
+        Flux::toast(variant: 'success', text: __(':name will be asked to confirm it arrived.', ['name' => Str::before($to->name, ' ')]));
+        unset($this->pendingPayments);
+    }
+
+    public function confirmPayment(int $settlementId, ConfirmSettlement $confirmSettlement): void
+    {
+        $settlement = $this->household->settlements()->findOrFail($settlementId);
+        $this->authorize('respond', $settlement);
+
+        try {
+            $confirmSettlement->handle(Auth::user(), $settlement);
+            Flux::toast(variant: 'success', text: __('Payment confirmed. Balances updated.'));
+        } catch (InvalidSettlement $e) {
+            Flux::toast(variant: 'danger', text: $e->getMessage());
+        }
+
+        $this->refreshFigures();
+    }
+
+    public function rejectPayment(int $settlementId, RejectSettlement $rejectSettlement): void
+    {
+        $settlement = $this->household->settlements()->findOrFail($settlementId);
+        $this->authorize('respond', $settlement);
+
+        try {
+            $rejectSettlement->handle(Auth::user(), $settlement);
+            Flux::toast(text: __('Payment rejected. Balances are unchanged.'));
+        } catch (InvalidSettlement $e) {
+            Flux::toast(variant: 'danger', text: $e->getMessage());
+        }
+
+        $this->refreshFigures();
+    }
+
+    /**
      * Show the household's live invite link, creating one only if none exists.
      * Opening the modal repeatedly reuses the same link, so it never piles up rows.
      */
@@ -228,7 +343,48 @@ new class extends Component
     #[On('echo-reconnected')]
     public function refreshFigures(): void
     {
-        unset($this->bills, $this->summary);
+        unset($this->bills, $this->summary, $this->pendingPayments);
+    }
+
+    /**
+     * Someone says they paid the viewer (private user channel, so it can be any household).
+     *
+     * @param  array{household_id: int, actor_name: string, amount: string}  $event
+     */
+    #[On('echo-private:App.Models.User.{viewerId},.settlement.requested')]
+    public function paymentRequested(array $event): void
+    {
+        unset($this->pendingPayments);
+
+        Flux::toast(text: __(':name says they paid you :amount. Please confirm it.', ['name' => $event['actor_name'], 'amount' => $event['amount']]));
+    }
+
+    /**
+     * The recipient said the viewer's payment never arrived.
+     *
+     * @param  array{household_id: int, actor_name: string, amount: string}  $event
+     */
+    #[On('echo-private:App.Models.User.{viewerId},.settlement.rejected')]
+    public function paymentRejected(array $event): void
+    {
+        unset($this->pendingPayments);
+
+        Flux::toast(variant: 'warning', text: __(':name didn\'t confirm your :amount payment.', ['name' => $event['actor_name'], 'amount' => $event['amount']]));
+    }
+
+    /**
+     * A payment was confirmed. Balances arrive separately (.balances.updated).
+     *
+     * @param  array{actor_id: int, actor_name: string, from_name: string, amount: string}  $event
+     */
+    #[On('echo-private:households.{household.id},.settlement.confirmed')]
+    public function paymentConfirmed(array $event): void
+    {
+        unset($this->pendingPayments);
+
+        if ($event['actor_id'] !== Auth::id()) {
+            Flux::toast(text: __(':name confirmed :from\'s :amount payment.', ['name' => $event['actor_name'], 'from' => $event['from_name'], 'amount' => $event['amount']]));
+        }
     }
 
     /**
@@ -428,6 +584,39 @@ new class extends Component
         </flux:card>
 
         <div class="flex flex-col gap-6">
+            {{-- Payments waiting for an answer: only the recipient can confirm --}}
+            @if ($this->pendingPayments->isNotEmpty())
+                <flux:card data-test="pending-payments">
+                    <flux:heading size="lg" level="2">{{ __('Payments to confirm') }}</flux:heading>
+
+                    <ul class="mt-3 divide-y divide-line" role="list">
+                        @foreach ($this->pendingPayments as $payment)
+                            @php($toYou = $payment->to_user_id === auth()->id())
+                            <li wire:key="payment-{{ $payment->id }}" class="py-3">
+                                <div class="flex items-center gap-3">
+                                    <x-avatar :user="$toYou ? $payment->fromUser : $payment->toUser" size="sm" />
+                                    <p class="min-w-0 flex-1 text-sm text-muted">
+                                        @if ($toYou)
+                                            {{ __(':name says they paid you', ['name' => Str::before($payment->fromUser->name, ' ')]) }}
+                                        @else
+                                            {{ __('You paid :name · waiting for them to confirm', ['name' => Str::before($payment->toUser->name, ' ')]) }}
+                                        @endif
+                                    </p>
+                                    <span class="text-sm font-bold text-ink">{{ Money::format($payment->amount, $currency) }}</span>
+                                </div>
+
+                                @can('respond', $payment)
+                                    <div class="mt-3 grid grid-cols-2 gap-2">
+                                        <flux:button size="sm" wire:click="rejectPayment({{ $payment->id }})" data-test="reject-payment">{{ __('Not received') }}</flux:button>
+                                        <flux:button size="sm" variant="primary" wire:click="confirmPayment({{ $payment->id }})" data-test="confirm-payment">{{ __('Confirm') }}</flux:button>
+                                    </div>
+                                @endcan
+                            </li>
+                        @endforeach
+                    </ul>
+                </flux:card>
+            @endif
+
             {{-- Who owes who: suggested payments from the ledger --}}
             <flux:card>
                 <flux:heading size="lg" level="2">{{ __('Who owes who') }}</flux:heading>
@@ -456,8 +645,9 @@ new class extends Component
                         @endforeach
                     </ul>
 
-                    {{-- Settling up arrives in roadmap step 7. --}}
-                    <flux:button variant="primary" class="mt-4 w-full" disabled>{{ __('Settle up (coming soon)') }}</flux:button>
+                    @can('create', [Settlement::class, $household])
+                        <flux:button variant="primary" class="mt-4 w-full" wire:click="settleUp" data-test="settle-up-button">{{ __('Settle up') }}</flux:button>
+                    @endcan
                 @endif
             </flux:card>
 
@@ -589,6 +779,34 @@ new class extends Component
             </div>
         </form>
     </flux:modal>
+
+    {{-- Settle up: record a payment you've made. It counts once the recipient confirms. --}}
+    @can('create', [Settlement::class, $household])
+        <flux:modal name="settle-up" class="w-full max-w-md">
+            <form wire:submit="recordPayment" class="space-y-5">
+                <div>
+                    <flux:heading size="lg">{{ __('Record a payment') }}</flux:heading>
+                    <flux:text class="mt-1">{{ __('Pay them outside HousePot first (bank transfer, cash). They\'ll be asked to confirm it arrived, then balances update.') }}</flux:text>
+                </div>
+
+                <flux:select wire:model="payTo" :label="__('Who did you pay?')" :placeholder="__('Choose a housemate')" data-test="pay-to">
+                    @foreach ($this->members as $member)
+                        @continue($member->is(auth()->user()))
+                        <flux:select.option :value="$member->id">{{ $member->name }}</flux:select.option>
+                    @endforeach
+                </flux:select>
+
+                <flux:input wire:model="payAmount" :label="__('Amount (:currency)', ['currency' => $currency])" inputmode="decimal" placeholder="0.00" required />
+
+                <div class="flex justify-end gap-2">
+                    <flux:modal.close>
+                        <flux:button variant="ghost">{{ __('Cancel') }}</flux:button>
+                    </flux:modal.close>
+                    <flux:button type="submit" variant="primary" data-test="record-payment-button">{{ __('Record payment') }}</flux:button>
+                </div>
+            </form>
+        </flux:modal>
+    @endcan
 
     {{-- Delete confirmation --}}
     <flux:modal name="delete-bill" class="w-full max-w-md">
