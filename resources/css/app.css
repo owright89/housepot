@@ -33,6 +33,10 @@
     --hp-coral-soft: #FCE9E3;
     /* Form control edges need 3:1 against the card (WCAG 1.4.11); --hp-line is decorative only. */
     --hp-control-line: #7F8F88;
+    /* Charts: one blue hue (green and coral already mean owed / owe). Validated as an ordinal
+       pair against the card surface with the dataviz validator. */
+    --hp-chart: #2A78D6;
+    --hp-chart-soft: #86B6EF;
 }
 
 .dark {
@@ -49,6 +53,8 @@
     --hp-coral: #FF8466;
     --hp-coral-soft: #3A211A;
     --hp-control-line: #647770;
+    --hp-chart: #6DA7EC;
+    --hp-chart-soft: #1C5CAB;
 }
 
 @theme inline {
@@ -64,6 +70,8 @@
     --color-primary-soft: var(--hp-primary-soft);
     --color-coral: var(--hp-coral);
     --color-coral-soft: var(--hp-coral-soft);
+    --color-chart: var(--hp-chart);
+    --color-chart-soft: var(--hp-chart-soft);
 }
 
 @theme {

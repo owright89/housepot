@@ -7,6 +7,7 @@ use App\Models\Expense;
 use App\Models\Household;
 use App\Models\Settlement;
 use App\Models\User;
+use App\Reports\MonthlySpending;
 use App\Support\Money;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
@@ -18,6 +19,12 @@ use Livewire\Attributes\Title;
 use Livewire\Component;
 
 new #[Title('Dashboard')] class extends Component {
+    /** Spending chart: 'household' (all bills) or 'mine' (the viewer's shares). */
+    public string $spendingView = 'household';
+
+    /** Spending chart: the month shown by category ('Y-m'); null means the latest. */
+    public ?string $spendingMonth = null;
+
     #[Computed]
     public function household(): ?Household
     {
@@ -57,7 +64,7 @@ new #[Title('Dashboard')] class extends Component {
      */
     public function refreshFigures(): void
     {
-        unset($this->summary, $this->recentBills, $this->activity);
+        unset($this->summary, $this->recentBills, $this->activity, $this->spending);
     }
 
     /**
@@ -119,7 +126,7 @@ new #[Title('Dashboard')] class extends Component {
      */
     private function announce(array $event, string $message): void
     {
-        unset($this->recentBills, $this->activity);
+        unset($this->recentBills, $this->activity, $this->spending);
 
         if ($event['actor_id'] !== Auth::id()) {
             Flux::toast(text: $message);
@@ -141,6 +148,28 @@ new #[Title('Dashboard')] class extends Component {
     public function summary(): HouseholdSummary
     {
         return HouseholdSummary::for($this->household, Auth::user());
+    }
+
+    /**
+     * The last six months of spending: the household's bills, or just the viewer's shares.
+     */
+    #[Computed]
+    public function spending(): MonthlySpending
+    {
+        return MonthlySpending::for($this->household, $this->spendingView === 'mine' ? Auth::user() : null);
+    }
+
+    public function updatedSpendingView(string $value): void
+    {
+        // Anything other than the two known views falls back to the household total.
+        $this->spendingView = $value === 'mine' ? 'mine' : 'household';
+        unset($this->spending);
+    }
+
+    public function selectSpendingMonth(string $key): void
+    {
+        // Unknown months fall back to the latest (MonthlySpending::month()).
+        $this->spendingMonth = $key;
     }
 
     /**
@@ -307,8 +336,9 @@ new #[Title('Dashboard')] class extends Component {
         </div>
 
         <div class="grid gap-6 lg:grid-cols-3">
+            <div class="flex flex-col gap-6 lg:col-span-2">
             {{-- Recent bills --}}
-            <flux:card class="p-0! lg:col-span-2">
+            <flux:card class="p-0!">
                 <div class="flex items-center justify-between px-5 py-4">
                     <flux:heading size="lg" level="2">{{ __('Recent bills') }}</flux:heading>
                     <flux:link :href="route('households.show', $this->household)" wire:navigate class="text-sm font-semibold">{{ __('See all') }}</flux:link>
@@ -346,6 +376,39 @@ new #[Title('Dashboard')] class extends Component {
                     </ul>
                 @endif
             </flux:card>
+
+            {{-- Spending over the last six months --}}
+            <flux:card data-test="spending-card">
+                <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <flux:heading size="lg" level="2">{{ __('Spending') }}</flux:heading>
+                        <flux:text size="sm" class="mt-0.5">
+                            {{ $spendingView === 'mine' ? __('Your share of bills, last 6 months') : __('All household bills, last 6 months') }}
+                        </flux:text>
+                    </div>
+
+                    <div class="flex rounded-(--radius-control) bg-subtle p-1" role="group" aria-label="{{ __('Whose spending') }}">
+                        @foreach (['household' => __('Household'), 'mine' => __('Your share')] as $value => $label)
+                            <button
+                                type="button"
+                                wire:click="$set('spendingView', '{{ $value }}')"
+                                aria-pressed="{{ $spendingView === $value ? 'true' : 'false' }}"
+                                @class([
+                                    'rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors',
+                                    'bg-card text-ink shadow-xs' => $spendingView === $value,
+                                    'text-muted hover:text-ink' => $spendingView !== $value,
+                                ])
+                            >{{ $label }}</button>
+                        @endforeach
+                    </div>
+                </div>
+
+                {{-- Refetch keeps the frame: dim, don't blank --}}
+                <div wire:loading.class="opacity-60" wire:target="spendingView, selectSpendingMonth" class="transition-opacity">
+                    <x-spending-chart :spending="$this->spending" :selected="$spendingMonth" :currency="$currency" />
+                </div>
+            </flux:card>
+            </div>
 
             <div class="flex flex-col gap-6">
                 {{-- Balances with the viewer --}}
