@@ -130,9 +130,11 @@ jobs:
           fi
           docker compose pull
           # Migrations run against the new code before it starts serving. A failure stops the deploy
-          # here, with the old containers still running.
-          docker compose run --rm --no-deps app php artisan migrate --force
+          # here, with the old containers still running. -T and </dev/null stop it reading this
+          # script's stdin (it arrives over ssh), which would silently skip the steps below.
+          docker compose run --rm --no-deps -T app php artisan migrate --force </dev/null
           docker compose up -d --wait
+          docker compose ps
           # Remove Housepot images that are no longer used and over 30 days old (older SHAs stay in GHCR).
           docker image prune -af --filter "label=org.opencontainers.image.source=$image_source" --filter 'until=720h'
           EOF
