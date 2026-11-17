@@ -779,7 +779,8 @@ new class extends Component
 
             <flux:input wire:model="form.description" :label="__('What was it?')" :placeholder="__('e.g. Energy, Rent, Broadband')" maxlength="100" required />
 
-            <div class="grid gap-4 sm:grid-cols-2">
+            {{-- Side by side even on phones: both are short, and it keeps the form to one screen --}}
+            <div class="grid grid-cols-2 gap-3 sm:gap-4">
                 <flux:input wire:model.blur="form.amount" :label="__('Amount (:currency)', ['currency' => $currency])" inputmode="decimal" placeholder="0.00" required />
                 <flux:input wire:model="form.spentOn" type="date" :label="__('Paid on')" :max="now()->toDateString()" required />
             </div>
