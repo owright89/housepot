@@ -54,3 +54,19 @@ test('the household page lists the other members for the online avatars', functi
         ->assertSeeHtml("online.includes({$bob->id})")
         ->assertDontSeeHtml("online.includes({$alice->id})");
 });
+
+test('the bill form announces typing so others see "X is adding a bill…"', function () {
+    $alice = User::factory()->create(['name' => 'Alice Smith']);
+    $bob = User::factory()->create(['name' => 'Bob Jones']);
+    $household = Household::factory()->withOwner($alice)->withMember($bob)->create();
+    actingAs($alice);
+
+    Livewire::test('pages::households.show', ['household' => $household])
+        // The bill form raises the events…
+        ->assertSeeHtml("\$dispatch('household-typing'")
+        ->assertSeeHtml("\$dispatch('household-typing-stopped')")
+        // …and the presence component whispers them and shows other people's.
+        ->assertSeeHtml("x-on:household-typing.window=\"presence?.whisper('typing'")
+        ->assertSeeHtml(".listenForWhisper('typing'")
+        ->assertSeeHtml('data-test="typing-indicator"');
+});

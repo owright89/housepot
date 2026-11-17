@@ -719,9 +719,14 @@ new class extends Component
         </flux:modal>
     @endcan
 
-    {{-- Add / edit bill --}}
+    {{-- Add / edit bill. Typing tells <x-household-presence> to whisper "X is adding a bill…" (throttled). --}}
     <flux:modal name="bill-form" class="w-full max-w-lg">
-        <form wire:submit="saveBill" class="space-y-5">
+        <form
+            wire:submit="saveBill"
+            x-on:input.throttle.2000ms="$dispatch('household-typing', { editing: Boolean($wire.form.expenseId) })"
+            x-on:submit="$dispatch('household-typing-stopped')"
+            class="space-y-5"
+        >
             <div>
                 <flux:heading size="lg">{{ $form->expenseId ? __('Edit bill') : __('Add a bill') }}</flux:heading>
                 <flux:text class="mt-1">{{ __('Add bills once they\'re paid. Everyone\'s balance updates straight away.') }}</flux:text>
@@ -772,7 +777,7 @@ new class extends Component
 
             <div class="flex justify-end gap-2">
                 <flux:modal.close>
-                    <flux:button variant="ghost">{{ __('Cancel') }}</flux:button>
+                    <flux:button variant="ghost" x-on:click="$dispatch('household-typing-stopped')">{{ __('Cancel') }}</flux:button>
                 </flux:modal.close>
                 <flux:button type="submit" variant="primary" data-test="save-bill-button">
                     {{ $form->expenseId ? __('Save changes') : __('Add bill') }}
